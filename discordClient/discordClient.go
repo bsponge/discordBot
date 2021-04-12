@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"log"
+  "io"
 	"math/rand"
 	"net"
 	"net/http"
@@ -164,6 +165,7 @@ func (client *DiscordClient) readPump(conn *websocket.Conn) {
 				return
 			}
 			var m map[string]interface{}
+      log.Println(m)
 			json.Unmarshal(message, &m)
 			log.Println("recv:", string(message))
 			log.Println()
@@ -317,7 +319,7 @@ type voiceConnStruct struct {
 
 func (client *DiscordClient) ConnectToVoiceEndpoint() {
 	client.ServerId = "741230309441404948"
-	conn, _, err := websocket.DefaultDialer.Dial("wss://"+client.VoiceEndpoint[:len(client.VoiceEndpoint)-3]+"?v=4", nil)
+	conn, _, err := websocket.DefaultDialer.Dial("wss://"+client.VoiceEndpoint[:len(client.VoiceEndpoint)]+"?v=4", nil)
 	client.VoiceConn = conn
 	if err != nil {
 		log.Fatal("voice dial:", err)
@@ -440,10 +442,13 @@ type speaking struct {
 func (client *DiscordClient) SendLambo() {
 	js := payload{5, speaking{5, 0, 1}}
 	client.muVoiceWrite.Lock()
-	client.VoiceConn.WriteJSON(js)
+  err := client.VoiceConn.WriteJSON(js)
+  if err != nil {
+    log.Fatal(err)
+  }
 	client.muVoiceWrite.Unlock()
 
-	client.sendSound("/home/js/Downloads/lemon")
+	client.sendSound("/home/js/Downloads/lemon.opus")
 }
 
 func (client *DiscordClient) sendSound(fname string) {
@@ -464,6 +469,9 @@ func (client *DiscordClient) sendSound(fname string) {
 	for {
 		n, err := s.Read(buf)
 		log.Println("FRAME", n)
+    if err == io.EOF {
+      break
+    }
 		if err != nil {
 			break
 		} else if err != nil {
