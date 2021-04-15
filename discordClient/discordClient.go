@@ -25,7 +25,6 @@ import (
 TODO
 
 - sending voice
-- heartbeat for voiceEndpoint
 - add errors handling and errors creating
 
 */
@@ -88,7 +87,7 @@ const (
 	PERMISSIONS = "2080374774"
 	API_URL     = "https://discord.com/api"
 	SAMPLE_RATE = 48000
-	CHANNELS    = 1
+	CHANNELS    = 2
 )
 
 var upgrader = websocket.Upgrader{
@@ -535,16 +534,17 @@ func (client *DiscordClient) SendLambo() {
 
   quit := make(chan bool)
   quitAudio := make(chan bool)
-  audio := client.soundEncoder("/home/js/Downloads/lemon.opus", quit)
-  go client.soundSender(audio, quitAudio, 960 * CHANNELS, SAMPLE_RATE, quit)
+  audio := client.soundEncoder("/home/js/Downloads/music", quit)
+  go client.soundSender(audio, quitAudio, 960, SAMPLE_RATE, quit)
 }
 
 func (client *DiscordClient) soundEncoder(file string, quit <- chan bool) chan []byte {
   c := make(chan []byte) 
 
-  pcmbuf := make([]int16, 16384)
+  
   go func() {
-    enc, err := opus.NewEncoder(SAMPLE_RATE, CHANNELS, opus.AppVoIP)
+    pcmbuf := make([]int16, 16384)
+    enc, err := opus.NewEncoder(48000, 2, opus.AppVoIP)
     if err != nil {
       log.Fatal(err)
     }
@@ -567,8 +567,16 @@ func (client *DiscordClient) soundEncoder(file string, quit <- chan bool) chan [
         log.Fatal(err)
       }
       if n == 960 {
-        pcm := pcmbuf[:n*CHANNELS]
-        data := make([]byte, 10000)
+        pcm := pcmbuf[:n * CHANNELS]
+        data := make([]byte, 2000)
+        /*
+        a, err := enc.Encode(pcm[:n], data)
+        if err != nil {
+          log.Fatal(err)
+        }
+        b, err := enc.Encode(pcm[n:], data[a:])
+        
+        */
         n, err = enc.Encode(pcm, data)
         if err != nil {
           log.Fatal(err)
@@ -582,25 +590,6 @@ func (client *DiscordClient) soundEncoder(file string, quit <- chan bool) chan [
   return c
 }
 
-func encodePcm(pcm []int16) []byte {
-  enc, err := opus.NewEncoder(SAMPLE_RATE, CHANNELS, opus.AppVoIP)
-  if err != nil {
-    log.Println("tutaj")
-    log.Fatal(err)
-  }
-  const bufferSize = 10000
-  data := make([]byte, bufferSize)
-  n, err := enc.Encode(pcm, data)
-  if err != nil {
-    log.Println("tu")
-    log.Fatal(err.Error())
-  }
-  data = data[:n]
-  return data
-}
-
-
-
 func (client *DiscordClient) soundSender(audioChan <- chan []byte, quitAudio <-chan bool, frameSize, sampleRate int, quit <- chan bool) {
   sequence := client.SSRC
   timestamp := uint32(rand.Intn(530))
@@ -611,14 +600,12 @@ func (client *DiscordClient) soundSender(audioChan <- chan []byte, quitAudio <-c
 
   nonce := [24]byte{}
 
-  timeIncr := uint32(20) //uint32(float32(frameSize / CHANNELS * 1000 / sampleRate))
-  log.Println(timeIncr)
+  timeIncr := uint32(frameSize / (sampleRate / 1000))
 
   ticker := time.NewTicker(time.Millisecond * time.Duration(timeIncr))
 
   var recvAudio []byte
 
-  timeStart := time.Now()
   
   for {
     binary.BigEndian.PutUint32(header[8:], client.SSRC)
@@ -646,73 +633,15 @@ func (client *DiscordClient) soundSender(audioChan <- chan []byte, quitAudio <-c
       //
     }
 
-    log.Println(time.Now().Sub(timeStart))
     _, err := client.UDPConn.Write(send)
-    timeStart = time.Now()
     if err != nil {
       log.Fatal(err)
     }
-    timestamp += (timeIncr + 5)
+    timestamp += uint32(frameSize)
     sequence++
   }
 }
 
-
-func (client *DiscordClient) sendSound(fname string) {
-  sequence := client.SSRC
-	var timestamp uint32 = uint32(rand.Intn(530))
-	f, err := os.Open(fname)
-	if err != nil {
-		log.Fatal(err)
-	}
-	s, err := opus.NewStream(f)
-	if err != nil {
-		log.Fatal(err)
-	}
-  defer s.Close()
-  data := make([]byte, 12, 12)
-  data[0] = 0x80
-  data[1] = 0x78
-  buf := make([]int16, 2000)
-  ticker := time.NewTicker(20 * time.Millisecond)
-
-  for {
-    n, err := s.Read(buf)
-    //log.Println("FRAME", n)
-    if err == io.EOF {
-      break
-    } else if err != nil {
-      log.Fatal(err)
-    }
-    pcm := buf[:n*CHANNELS]
-
-    
-    binary.BigEndian.PutUint32(data[8:], client.SSRC)
-    binary.BigEndian.PutUint32(data[4:], timestamp)
-    binary.BigEndian.PutUint16(data[2:], uint16(sequence))
-
-    var nonce [24]byte
-    for i := 0; i < 12; i++ {
-      nonce[i] = data[i]
-      //nonce[12+i] = 0
-    }
-
-    if n == 960 {
-      opus := encodePcm(pcm)
-
-      send := secretbox.Seal(data, opus, &nonce, &client.SecretKey)
-
-      <-ticker.C
-
-      n, err = (*client.UDPConn).Write(send)
-      if err != nil {
-        log.Fatal(err)
-      }
-      timestamp = timestamp + 20
-      sequence++
-    }
-  }
-}
 
 type heartbeat struct {
 	Op int `json:"op"`
