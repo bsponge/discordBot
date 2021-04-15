@@ -28,12 +28,12 @@ func endpoint(w http.ResponseWriter, r *http.Request) {
 var authenticationCode []string
 
 func main() {
-  content, err := ioutil.ReadFile("botToken")
+  content, err := ioutil.ReadFile("botToken.txt")
   if err != nil {
     log.Fatal(err)
   }
   botToken := string(content)
-  content, err = ioutil.ReadFile("clientId")
+  content, err = ioutil.ReadFile("clientId.txt")
   if err != nil {
     log.Fatal(err)
   }
