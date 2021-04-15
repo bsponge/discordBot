@@ -33,9 +33,12 @@ func main() {
     log.Fatal(err)
   }
   botToken := string(content)
-  botToken = botToken[:len(botToken)-1]
-  log.Println(botToken)
-	client := discordClient.NewDiscordClient("740994652035088387", botToken)
+  content, err = ioutil.ReadFile("clientId")
+  if err != nil {
+    log.Fatal(err)
+  }
+  clientId := string(content)
+	client := discordClient.NewDiscordClient(clientId, botToken)
 	go func() {
 		for {
 			PrintMenu()
