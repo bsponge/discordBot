@@ -107,9 +107,15 @@ func NewDiscordClient(clientId, botToken string) DiscordClient {
 
 func (d *DiscordClient) Gateway() {
 	client := &http.Client{}
-	req, _ := http.NewRequest("GET", API_URL+"/gateway/bot", nil)
-	req.Header.Add("Authorization", "Bot "+d.BotToken)
-	res, _ := client.Do(req)
+	req, err := http.NewRequest("GET", API_URL+"/gateway/bot", nil)
+  if err != nil {
+    log.Fatal(err)
+  }
+	req.Header.Add("Authorization", "Bot " + d.BotToken)
+	res, err := client.Do(req)
+  if err != nil {
+    log.Fatal(err)
+  }
 	buf := new(bytes.Buffer)
 	buf.ReadFrom(res.Body)
 	newStr := buf.String()
@@ -534,7 +540,11 @@ func (client *DiscordClient) SendLambo() {
 
   quit := make(chan bool)
   quitAudio := make(chan bool)
-  audio := client.soundEncoder("/home/js/Downloads/music", quit)
+  dir, err := os.Getwd()
+  if err != nil {
+    log.Fatal(err)
+  }
+  audio := client.soundEncoder(dir + string(os.PathSeparator) + "lemon", quit)
   go client.soundSender(audio, quitAudio, 960, SAMPLE_RATE, quit)
 }
 

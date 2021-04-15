@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+  "log"
+  "io/ioutil"
 	"server.com/bot/discordClient"
 )
 
@@ -26,7 +28,14 @@ func endpoint(w http.ResponseWriter, r *http.Request) {
 var authenticationCode []string
 
 func main() {
-	client := discordClient.NewDiscordClient("740994652035088387", "NzQwOTk0NjUyMDM1MDg4Mzg3.XyxHDA.gbxTPTIzWlFmIuGj-Ay-KYPQdb4")
+  content, err := ioutil.ReadFile("botToken")
+  if err != nil {
+    log.Fatal(err)
+  }
+  botToken := string(content)
+  botToken = botToken[:len(botToken)-1]
+  log.Println(botToken)
+	client := discordClient.NewDiscordClient("740994652035088387", botToken)
 	go func() {
 		for {
 			PrintMenu()
