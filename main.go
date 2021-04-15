@@ -69,5 +69,7 @@ func main() {
 		}
 	}()
 	for {
+    c := make(chan int)
+    <-c
 	}
 }
