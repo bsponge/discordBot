@@ -24,7 +24,8 @@ import (
 
 TODO
 
-- sending voice
+- sequence overflow handling 
+- timestamp overflow handling
 - add errors handling and errors creating
 
 */
@@ -67,6 +68,8 @@ type DiscordClient struct {
 
 	muVoiceRead  sync.Mutex
 	muVoiceWrite sync.Mutex
+
+  Sequence uint32
 }
 
 const (
@@ -154,7 +157,6 @@ type properties struct {
 
 func (client *DiscordClient) identify() {
 	js := payload{2, d{client.BotToken, properties{"linux", "lib", "lib"}}}
-	log.Println(js)
 	client.muWrite.Lock()
 	client.Conn.WriteJSON(js)
 	client.muWrite.Unlock()
@@ -172,10 +174,8 @@ func (client *DiscordClient) readPump(conn *websocket.Conn) {
 				return
 			}
 			var m map[string]interface{}
-      log.Println(m)
 			json.Unmarshal(message, &m)
 			log.Println("recv:", string(message))
-			log.Println()
 			switch int(m["op"].(float64)) {
 			case DISPATCH:
 				t := m["t"].(string)
@@ -218,10 +218,7 @@ func (client *DiscordClient) readPump(conn *websocket.Conn) {
 					} else {
 						client.s = int(m["s"].(float64))
 					}
-					client.muS.Unlock() //client.muS.Lock()
-					//client.s = map["s"]
-					//client.muS.Unlock()
-					//log.Println("GATHERED:", client.SessionId)
+					client.muS.Unlock()
 				}
 			case HEARTBEAT:
 				//
@@ -258,7 +255,6 @@ func (client *DiscordClient) readPump(conn *websocket.Conn) {
 					client.s = int(m["s"].(float64))
 				}
 				client.muS.Unlock()
-				log.Println("ACK RECEIVED")
 			}
 		}
 	}()
@@ -275,7 +271,6 @@ func (client *DiscordClient) GetVoiceRegions() {
 	var result map[string]interface{}
 	json.Unmarshal([]byte(newStr), &result)
 
-	log.Println("VOICE REGION:")
 }
 
 type wrap struct {
@@ -292,7 +287,7 @@ type voiceStruct struct {
 func (client *DiscordClient) RetrieveVoiceServerInformation() {
 	httpclient := &http.Client{}
 	req, _ := http.NewRequest("GET", API_URL+"/users/@me/guilds", nil)
-	req.Header.Add("Authorization", "Bot "+client.BotToken)
+	req.Header.Add("Authorization", "Bot " + client.BotToken)
 	res, _ := httpclient.Do(req)
 	buf := new(bytes.Buffer)
 	buf.ReadFrom(res.Body)
@@ -489,7 +484,6 @@ func (client *DiscordClient) readVoiceEndpoint(conn *websocket.Conn) {
 						if err != nil {
 							log.Fatal("voice hb:", err)
 						}
-						log.Println("VOICE HD SENT")
 						time.Sleep(time.Duration(client.VoiceHeartBeatInterval) * time.Millisecond)
 					}
 				}()
@@ -530,7 +524,7 @@ type speaking struct {
 }
 
 func (client *DiscordClient) SendLambo() {
-  js := payload{5, speaking{5, 0, int(client.SSRC)}}
+  js := payload{5, speaking{5, 0, 0}}
 	client.muVoiceWrite.Lock()
   err := client.VoiceConn.WriteJSON(js)
   if err != nil {
@@ -554,7 +548,7 @@ func (client *DiscordClient) soundEncoder(file string, quit <- chan bool) chan [
   
   go func() {
     pcmbuf := make([]int16, 16384)
-    enc, err := opus.NewEncoder(48000, 2, opus.AppVoIP)
+    enc, err := opus.NewEncoder(48000, 2, opus.AppAudio)
     if err != nil {
       log.Fatal(err)
     }
@@ -569,9 +563,11 @@ func (client *DiscordClient) soundEncoder(file string, quit <- chan bool) chan [
     defer f.Close()
     defer s.Close()
     defer close(c)
+    log.Println("Start enncoding")
     for {
       n, err := s.Read(pcmbuf)
       if err == io.EOF {
+        log.Println("EOF")
         return
       } else if err != nil {
         log.Fatal(err)
@@ -579,20 +575,14 @@ func (client *DiscordClient) soundEncoder(file string, quit <- chan bool) chan [
       if n == 960 {
         pcm := pcmbuf[:n * CHANNELS]
         data := make([]byte, 2000)
-        /*
-        a, err := enc.Encode(pcm[:n], data)
-        if err != nil {
-          log.Fatal(err)
-        }
-        b, err := enc.Encode(pcm[n:], data[a:])
-        
-        */
         n, err = enc.Encode(pcm, data)
         if err != nil {
           log.Fatal(err)
         }
         data = data[:n]
         c <- data
+      } else if n == 0 {
+        return
       }
     }
   }()
@@ -601,7 +591,7 @@ func (client *DiscordClient) soundEncoder(file string, quit <- chan bool) chan [
 }
 
 func (client *DiscordClient) soundSender(audioChan <- chan []byte, quitAudio <-chan bool, frameSize, sampleRate int, quit <- chan bool) {
-  sequence := client.SSRC
+  sequence := client.Sequence //client.SSRC
   timestamp := uint32(rand.Intn(530))
 
   header := make([]byte, 12)
@@ -617,6 +607,7 @@ func (client *DiscordClient) soundSender(audioChan <- chan []byte, quitAudio <-c
   var recvAudio []byte
 
   
+  log.Println("Start sending")
   for {
     binary.BigEndian.PutUint32(header[8:], client.SSRC)
     binary.BigEndian.PutUint32(header[4:], timestamp)
@@ -625,6 +616,17 @@ func (client *DiscordClient) soundSender(audioChan <- chan []byte, quitAudio <-c
     select {
     case a, ok := <-audioChan:
       if !ok {
+        log.Println("End sending audio") 
+        js := payload{5, speaking{0, 0, int(client.SSRC)}}
+        client.muVoiceWrite.Lock()
+        err := client.VoiceConn.WriteJSON(js)
+        if err != nil {
+          log.Fatal(err)
+        }
+        client.muVoiceWrite.Unlock()
+
+        client.Sequence = sequence
+
         return
       }
       recvAudio = a
@@ -660,7 +662,6 @@ type heartbeat struct {
 
 func (client *DiscordClient) sendHeartBeatEvery(milis int) {
 	for {
-		log.Println("ABOUT TO SEND HB")
 		var js heartbeat
 		client.muS.Lock()
 		js = heartbeat{1, client.s}
@@ -672,7 +673,6 @@ func (client *DiscordClient) sendHeartBeatEvery(milis int) {
 		if err != nil {
 			log.Println("error:", err)
 		}
-		log.Println("HB SENT")
 		time.Sleep(time.Duration(milis) * time.Millisecond)
 
 	}
