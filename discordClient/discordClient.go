@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+  "strings"
 	"golang.org/x/crypto/nacl/secretbox"
 	"gopkg.in/hraban/opus.v2"
 )
@@ -38,7 +39,9 @@ type DiscordClient struct {
 	Conn                   *websocket.Conn
 	VoiceConn              *websocket.Conn
 
-	UDPConn *net.Conn
+	UDPConn *net.UDPConn
+
+  UDPAddress *net.UDPAddr
 
 	VoiceUDPIp   string
 	VoiceUDPPort int
@@ -47,7 +50,7 @@ type DiscordClient struct {
 	MyIp   string
 	MyPort uint16
 
-	SecretKey []byte
+	SecretKey [32]byte
 
 	GuildId   string
 	SessionId string
@@ -85,7 +88,7 @@ const (
 	PERMISSIONS = "2080374774"
 	API_URL     = "https://discord.com/api"
 	SAMPLE_RATE = 48000
-	CHANNELS    = 2
+	CHANNELS    = 1
 )
 
 var upgrader = websocket.Upgrader{
@@ -145,7 +148,6 @@ type properties struct {
 }
 
 func (client *DiscordClient) identify() {
-	//js := fmt.Sprintf("{\"op\":2,\"d\":{\"token\":\"%s\",\"properties\":{\"$os\":\"linux\",\"$browser\":\"my_library\",\"$device\":\"my_library\"}}}", d.BotToken)
 	js := payload{2, d{client.BotToken, properties{"linux", "lib", "lib"}}}
 	log.Println(js)
 	client.muWrite.Lock()
@@ -364,55 +366,113 @@ func (client *DiscordClient) readVoiceEndpoint(conn *websocket.Conn) {
 
 			switch int(m["op"].(float64)) {
 			case 0:
-				log.Println("OP CODE 1 RECEIVED")
+				log.Println("OP CODE 0 RECEIVED")
+      case 1:
+        log.Println("OP CODE 1 RECEIVED")
 			case 2:
 				client.VoiceUDPIp = m["d"].(map[string]interface{})["ip"].(string)
 				client.VoiceUDPPort = int(m["d"].(map[string]interface{})["port"].(float64))
 				client.SSRC = uint32(m["d"].(map[string]interface{})["ssrc"].(float64))
 
-				conn, err := net.Dial("udp", client.VoiceUDPIp+":"+strconv.Itoa(client.VoiceUDPPort))
+        raddr, err := net.ResolveUDPAddr("udp", client.VoiceUDPIp+":"+strconv.Itoa(client.VoiceUDPPort))
+        if err != nil {
+          log.Fatal(err)
+        }
+        conn, err := net.DialUDP("udp", nil, raddr)
+        if err != nil {
+          log.Fatal(err)
+        }
+
+        client.UDPAddress = raddr
+
+        client.UDPConn = conn
+
+        sb := make([]byte, 70)
+        binary.BigEndian.PutUint32(sb, client.SSRC)
+        _, err = client.UDPConn.Write(sb)
+        if err != nil { 
+          log.Fatal(err)
+        }
+
+        rb := make([]byte, 70)
+        rlen, _, err := client.UDPConn.ReadFromUDP(rb)
+        if err != nil {
+          log.Fatal(err)
+        }
+        if rlen < 70 {
+          log.Fatal("too short response from UDP connection")
+        }
+        
+        
+        /*
+
+        buff := []byte{0, 1, 0, 70}
+        a := make([]byte, 4)
+        binary.BigEndian.PutUint32(a, uint32(client.SSRC))
+        buff = append(buff, a...)
+        for i := 0; i < 66; i++ {
+          buff = append(buff, 0)
+        }
+        _, err = conn.Write(buff)
+        time.Sleep(time.Second)
+        buff = make([]byte, 100)
+        _, err = conn.Read(buff)
+        if err != nil {
+          log.Fatal(err)
+        }
+
+        client.MyIp = string(buff[8:72])
+        client.MyPort = binary.BigEndian.Uint16(buff[72:74])
+        log.Println("my ip:", client.MyIp)
+        log.Println("my port:", client.MyPort)
+        
+        client.MyPort = uint16(i)
+        log.Println(i)
+        */
+
+        var ip string
+        for i := 4; i < 20; i++ {
+          if rb[i] == 0 {
+            break
+          }
+          ip += string(rb[i])
+        }
+ 
+        port := binary.BigEndian.Uint16(rb[68:70])
+        i, _ := strconv.Atoi(strings.Split(client.UDPConn.LocalAddr().String(), ":")[1])
+        client.MyIp = ip
+        client.MyPort = port
+
+        log.Println("IP:", ip)
+        log.Println("PORT:", port)
+
+        js := payload{1, OneOp{"udp", Data{ip, uint16(i), "xsalsa20_poly1305"}}}
+        log.Println("UDP CONN:", client.UDPConn.LocalAddr())
+
+        client.muVoiceWrite.Lock()
+        err = client.VoiceConn.WriteJSON(js)
+        client.muVoiceWrite.Unlock()
 				if err != nil {
 					log.Fatal(err)
-					return
 				}
-
-				client.UDPConn = &conn
-				buff := []byte{0, 1, 0, 70}
-				if err != nil {
-					log.Println(err)
-				}
-				a := make([]byte, 4)
-				binary.BigEndian.PutUint32(a, client.SSRC)
-				buff = append(buff, a...)
-				for i := 0; i < 66; i++ {
-					buff = append(buff, 0)
-				}
-				_, err = conn.Write(buff)
-				log.Println("SIEMA")
-				time.Sleep(time.Second)
-				buff = make([]byte, 100)
-				conn.SetDeadline(time.Now().Add(time.Second))
-				_, err = conn.Read(buff)
-				log.Println("IP DISCOVERY")
-				log.Println(buff)
-				client.MyIp = string(buff[8:72])
-				client.MyPort = binary.BigEndian.Uint16(buff[72:74])
-
-				js := payload{1, OneOp{"udp", Data{client.MyIp, client.MyPort, "xsalsa20_poly1305"}}}
-
-				client.muVoiceWrite.Lock()
-				err = client.VoiceConn.WriteJSON(js)
-				client.muVoiceWrite.Unlock()
-				if err != nil {
-					log.Fatal(err)
-				}
+        //close := make(chan bool)
+        //go client.keepAlive(5 * time.Second, close)
+      case 3:
+        log.Println("OP CODE 3 RECEIVED")
 			case 4:
-				arr := make([]byte, 32)
+        log.Println("SECRET KEY !!!!!!!!!!!!!!!!")
+				arr := [32]byte{}
 				for i, v := range m["d"].(map[string]interface{})["secret_key"].([]interface{}) {
 					arr[i] = byte(v.(float64))
 				}
-				client.SecretKey = arr
+        client.SecretKey = arr
 				log.Println("SECRETY KEY:", client.SecretKey)
+      case 5:
+        log.Println("OP CODE 5 RECEIVED")
+      case 6:
+        log.Println("OP CODE 6 RECEIVED")
+      case 7:
+        log.Println("OP CODE 7 RECEIVED")
 			case 8:
 				client.VoiceHeartBeatInterval = int(m["d"].(map[string]interface{})["heartbeat_interval"].(float64))
 				go func() {
@@ -428,9 +488,34 @@ func (client *DiscordClient) readVoiceEndpoint(conn *websocket.Conn) {
 						time.Sleep(time.Duration(client.VoiceHeartBeatInterval) * time.Millisecond)
 					}
 				}()
+      case 9:
+        log.Println("OP CODE 9 RECEIVED")
+      default:
+        log.Fatal("ERROR")
 			}
 		}
 	}()
+}
+
+func (client *DiscordClient) keepAlive(i time.Duration, close <- chan bool) {
+  var err error
+  var sequence uint64
+  packet := make([]byte, 8)
+  tick := time.NewTicker(i)
+  defer tick.Stop()
+  for {
+    binary.LittleEndian.PutUint64(packet, sequence)
+    sequence++
+    _, err = client.UDPConn.Write(packet)
+    if err != nil {
+      log.Fatal(err)
+    }
+    select {
+    case <-tick.C:
+    case <-close:
+        return
+    }
+  }
 }
 
 type speaking struct {
@@ -440,7 +525,7 @@ type speaking struct {
 }
 
 func (client *DiscordClient) SendLambo() {
-	js := payload{5, speaking{5, 0, 1}}
+  js := payload{5, speaking{5, 0, int(client.SSRC)}}
 	client.muVoiceWrite.Lock()
   err := client.VoiceConn.WriteJSON(js)
   if err != nil {
@@ -448,70 +533,185 @@ func (client *DiscordClient) SendLambo() {
   }
 	client.muVoiceWrite.Unlock()
 
-	client.sendSound("/home/js/Downloads/lemon.opus")
+  quit := make(chan bool)
+  quitAudio := make(chan bool)
+  audio := client.soundEncoder("/home/js/Downloads/lemon.opus", quit)
+  go client.soundSender(audio, quitAudio, 960 * CHANNELS, SAMPLE_RATE, quit)
 }
 
+func (client *DiscordClient) soundEncoder(file string, quit <- chan bool) chan []byte {
+  c := make(chan []byte) 
+
+  pcmbuf := make([]int16, 16384)
+  go func() {
+    enc, err := opus.NewEncoder(SAMPLE_RATE, CHANNELS, opus.AppVoIP)
+    if err != nil {
+      log.Fatal(err)
+    }
+    f, err := os.Open(file)
+    if err != nil {
+      log.Fatal(err)
+    }
+    s, err := opus.NewStream(f)
+    if err != nil {
+      log.Fatal(err)
+    }
+    defer f.Close()
+    defer s.Close()
+    defer close(c)
+    for {
+      n, err := s.Read(pcmbuf)
+      if err == io.EOF {
+        return
+      } else if err != nil {
+        log.Fatal(err)
+      }
+      if n == 960 {
+        pcm := pcmbuf[:n*CHANNELS]
+        data := make([]byte, 10000)
+        n, err = enc.Encode(pcm, data)
+        if err != nil {
+          log.Fatal(err)
+        }
+        data = data[:n]
+        c <- data
+      }
+    }
+  }()
+
+  return c
+}
+
+func encodePcm(pcm []int16) []byte {
+  enc, err := opus.NewEncoder(SAMPLE_RATE, CHANNELS, opus.AppVoIP)
+  if err != nil {
+    log.Println("tutaj")
+    log.Fatal(err)
+  }
+  const bufferSize = 10000
+  data := make([]byte, bufferSize)
+  n, err := enc.Encode(pcm, data)
+  if err != nil {
+    log.Println("tu")
+    log.Fatal(err.Error())
+  }
+  data = data[:n]
+  return data
+}
+
+
+
+func (client *DiscordClient) soundSender(audioChan <- chan []byte, quitAudio <-chan bool, frameSize, sampleRate int, quit <- chan bool) {
+  sequence := client.SSRC
+  timestamp := uint32(rand.Intn(530))
+
+  header := make([]byte, 12)
+  header[0] = 0x80
+  header[1] = 0x78
+
+  nonce := [24]byte{}
+
+  timeIncr := uint32(20) //uint32(float32(frameSize / CHANNELS * 1000 / sampleRate))
+  log.Println(timeIncr)
+
+  ticker := time.NewTicker(time.Millisecond * time.Duration(timeIncr))
+
+  var recvAudio []byte
+
+  timeStart := time.Now()
+  
+  for {
+    binary.BigEndian.PutUint32(header[8:], client.SSRC)
+    binary.BigEndian.PutUint32(header[4:], timestamp)
+    binary.BigEndian.PutUint16(header[2:], uint16(sequence))
+
+    select {
+    case a, ok := <-audioChan:
+      if !ok {
+        return
+      }
+      recvAudio = a
+    case <-quitAudio:
+      return
+    }
+
+    copy(nonce[:12], header)
+
+    send := secretbox.Seal(header, recvAudio, &nonce, &client.SecretKey) 
+
+    select {
+    case <-quit:
+      return
+    case <-ticker.C:
+      //
+    }
+
+    log.Println(time.Now().Sub(timeStart))
+    _, err := client.UDPConn.Write(send)
+    timeStart = time.Now()
+    if err != nil {
+      log.Fatal(err)
+    }
+    timestamp += (timeIncr + 5)
+    sequence++
+  }
+}
+
+
 func (client *DiscordClient) sendSound(fname string) {
-	sequence := rand.Intn(530)
-	timestamp := rand.Intn(500)
+  sequence := client.SSRC
+	var timestamp uint32 = uint32(rand.Intn(530))
 	f, err := os.Open(fname)
 	if err != nil {
 		log.Fatal(err)
-		return
 	}
 	s, err := opus.NewStream(f)
 	if err != nil {
 		log.Fatal(err)
-		return
 	}
-	defer s.Close()
-	buf := make([]int16, 16384)
-	for {
-		n, err := s.Read(buf)
-		log.Println("FRAME", n)
+  defer s.Close()
+  data := make([]byte, 12, 12)
+  data[0] = 0x80
+  data[1] = 0x78
+  buf := make([]int16, 2000)
+  ticker := time.NewTicker(20 * time.Millisecond)
+
+  for {
+    n, err := s.Read(buf)
+    //log.Println("FRAME", n)
     if err == io.EOF {
       break
+    } else if err != nil {
+      log.Fatal(err)
     }
-		if err != nil {
-			break
-		} else if err != nil {
-			log.Fatal(err)
-			return
-		}
+    pcm := buf[:n*CHANNELS]
 
-		var data []byte
-		a := make([]byte, 2)
-		b := make([]byte, 4)
-		binary.BigEndian.PutUint16(a, uint16(sequence))
-		binary.BigEndian.PutUint32(b, uint32(timestamp))
-		binary.BigEndian.PutUint32(b, uint32(client.SSRC))
-		data = append(data, 0x80)
-		data = append(data, 0x78)
-		data = append(data, a...)
-		data = append(data, b...)
-		data = append(data, b...)
+    
+    binary.BigEndian.PutUint32(data[8:], client.SSRC)
+    binary.BigEndian.PutUint32(data[4:], timestamp)
+    binary.BigEndian.PutUint16(data[2:], uint16(sequence))
 
-		var nonce [24]byte
-		for i := 0; i < 12; i++ {
-			nonce[i] = data[i]
-			nonce[12+i] = 0
-		}
-		var key [32]byte
-		for i := 0; i < 32; i++ {
-			key[i] = client.SecretKey[i]
-		}
-		var arr []byte
-		for i := 0; i < n*CHANNELS; i++ {
-			binary.BigEndian.PutUint16(a, uint16(buf[i]))
-			arr = append(arr, a...)
-		}
+    var nonce [24]byte
+    for i := 0; i < 12; i++ {
+      nonce[i] = data[i]
+      //nonce[12+i] = 0
+    }
 
-		data = secretbox.Seal(data, arr, &nonce, &key)
-		(*client.UDPConn).Write(data)
-		timestamp += 20
-		sequence++
-		time.Sleep(time.Duration(20) * time.Millisecond)
-	}
+    if n == 960 {
+      opus := encodePcm(pcm)
+
+      send := secretbox.Seal(data, opus, &nonce, &client.SecretKey)
+
+      <-ticker.C
+
+      n, err = (*client.UDPConn).Write(send)
+      if err != nil {
+        log.Fatal(err)
+      }
+      timestamp = timestamp + 20
+      sequence++
+    }
+  }
 }
 
 type heartbeat struct {

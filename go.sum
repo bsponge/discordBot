@@ -1,5 +1,8 @@
+github.com/glendc/go-external-ip v0.0.0-20200601212049-c872357d968e h1:gLpAlmoGqnW3a3GCkOe+Ic8hZoSCfi0PdA0B8j7d6uw=
+github.com/glendc/go-external-ip v0.0.0-20200601212049-c872357d968e/go.mod h1:o9OoDQyE1WHvYVUH1FdFapy1/rCZHHq3O5wS4VA83ig=
 github.com/gorilla/websocket v1.4.2 h1:+/TMaTYc4QFitKJxsQ7Yye35DkWvkdLcvGKqM+x0Ufc=
 github.com/gorilla/websocket v1.4.2/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
+github.com/hraban/opus v0.0.0-20201025103112-d779bb1cc5a2 h1:Br/jzv+7tTaFI6z2kwI8qmn0GvVnp2oHC6x/2XE0kyY=
 github.com/pounze/ByteBuffer_golang v0.0.0-20200309033128-c060a49d6a3d h1:snZ6H7IzD0O3gX4IkhZ8HPeiQRog5LEPMyLoryRtcsw=
 github.com/pounze/ByteBuffer_golang v0.0.0-20200309033128-c060a49d6a3d/go.mod h1:n19XfAvujp32midlDN/bOGACQ08SK4thf1zYU0+QzZ0=
 golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2/go.mod h1:djNgcEr1/C05ACkg1iLfiJU5Ep61QUkGW8qpdssI0+w=
@@ -10,7 +13,9 @@ golang.org/x/sys v0.0.0-20190215142949-d0b11bdaac8a/go.mod h1:STP8DvDyc/dI5b8T5h
 golang.org/x/sys v0.0.0-20190412213103-97732733099d h1:+R4KGOnez64A81RvjARKc4UT5/tI9ujCIVX+P5KiHuI=
 golang.org/x/sys v0.0.0-20190412213103-97732733099d/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
 golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
-gopkg.in/hraban/opus.v2 v2.0.0-20200710132758-e28f8214483b h1:ThVo35Ms4RdZape8OwJFcICfT0+oQ2iVn7yGXRDwA08=
-gopkg.in/hraban/opus.v2 v2.0.0-20200710132758-e28f8214483b/go.mod h1:/L5E7a21VWl8DeuCPKxQBdVG5cy+L0MRZ08B1wnqt7g=
+gopkg.in/hraban/opus.v1 v1.0.0-20191127225552-253473bb5aac h1:jswOSRCKjMTfZumozBdRCsNlHBb1HS+JMUyiMgDQqf4=
+gopkg.in/hraban/opus.v1 v1.0.0-20191127225552-253473bb5aac/go.mod h1:T+9zy8Y2m8j9NjZty1kwB31bEYei2IhmN+R+XylDcU8=
 gopkg.in/hraban/opus.v2 v2.0.0-20201025103112-d779bb1cc5a2 h1:sxrRNhZ+cNxxLwPw/vV8gNsz+bbqRQiZHBYBJfpyNoQ=
 gopkg.in/hraban/opus.v2 v2.0.0-20201025103112-d779bb1cc5a2/go.mod h1:/L5E7a21VWl8DeuCPKxQBdVG5cy+L0MRZ08B1wnqt7g=
+layeh.com/gopus v0.0.0-20161224163843-0ebf989153aa h1:WNU4LYsgD2UHxgKgB36mL6iMAMOvr127alafSlgBbiA=
+layeh.com/gopus v0.0.0-20161224163843-0ebf989153aa/go.mod h1:AOef7vHz0+v4sWwJnr0jSyHiX/1NgsMoaxl+rEPz/I0=
