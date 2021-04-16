@@ -7,6 +7,7 @@ import (
   "log"
   "io/ioutil"
 	"server.com/bot/discordClient"
+  "path/filepath"
 )
 
 func PrintMenu() {
@@ -25,9 +26,34 @@ func endpoint(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("Incoming request", *r)
 }
 
+func removeContents(dir string) error {
+    d, err := os.Open(dir)
+    if err != nil {
+        return err
+    }
+    defer d.Close()
+    names, err := d.Readdirnames(-1)
+    if err != nil {
+        return err
+    }
+    for _, name := range names {
+        err = os.RemoveAll(filepath.Join(dir, name))
+        if err != nil {
+            return err
+        }
+    }
+    return nil
+}
+
 var authenticationCode []string
 
 func main() {
+  dir := os.Getwd()
+  err := removeContents(dir + string(os.PathSeparator) + "music" + string(os.PathSeparator))
+  if err != nil {
+    log.Fatal(err)
+  }
+  
   content, err := ioutil.ReadFile("botToken.txt")
   if err != nil {
     log.Fatal(err)
@@ -59,7 +85,7 @@ func main() {
 				client.RetrieveVoiceServerInformation()
 				//fmt.Println("3")
 			case 4:
-				client.SendLambo()
+        fmt.Println("PLACEHOLDER")
 				//fmt.Println("4")
 			case 5:
 				client.Close()

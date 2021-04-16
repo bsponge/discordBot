@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+  "os/exec"
 
 	"github.com/gorilla/websocket"
   "strings"
@@ -218,10 +219,13 @@ func (client *DiscordClient) readPump(conn *websocket.Conn) {
 					}
 					client.muS.Unlock()
         case "MESSAGE_CREATE":
-          msg := m["d"].(map[string]interface{})["content"]
-          switch msg {
+          msg := m["d"].(map[string]interface{})["content"].(string)
+          action := strings.Split(msg, " ")
+          switch action[0] {
           case "play":
-            client.SendLambo()
+            if len(action) > 1 {
+              client.SendAudio(action[1:])
+            }
           case "stop":
             client.QuitAudioCh <- true
           }
@@ -472,10 +476,22 @@ type speaking struct {
 	Ssrc     int `json:"ssrc"`
 }
 
-func (client *DiscordClient) SendLambo() {
+func (client *DiscordClient) SendAudio(videoName []string) {
+  dir, err := os.Getwd()
+  if err != nil {
+    log.Fatal(err)
+  }
+  fileName := strings.Join(videoName, " ")
+  args := []string{"-o", dir + string(os.PathSeparator) + "music" + string(os.PathSeparator) + fileName + ".%(ext)s", "-q", "-x", "--audio-format", "opus", "ytsearch1:" + fileName}
+  cmd := exec.Command("youtube-dl", args...)
+  err = cmd.Run()
+  if err != nil {
+    log.Fatal(err)
+  }
+
   js := payload{5, speaking{5, 0, 0}}
 	client.muVoiceWrite.Lock()
-  err := client.VoiceConn.WriteJSON(js)
+  err = client.VoiceConn.WriteJSON(js)
   if err != nil {
     log.Fatal(err)
   }
@@ -484,11 +500,8 @@ func (client *DiscordClient) SendLambo() {
   quit := make(chan bool)
   client.QuitAudioCh = quit
   quitAudio := make(chan bool)
-  dir, err := os.Getwd()
-  if err != nil {
-    log.Fatal(err)
-  }
-  audio := client.soundEncoder(dir + string(os.PathSeparator) + "music" + string(os.PathSeparator) + "lemon", quit)
+  
+  audio := client.soundEncoder(dir + string(os.PathSeparator) + "music" + string(os.PathSeparator) + fileName + ".opus", quit)
   go client.soundSender(audio, quitAudio, 960, SAMPLE_RATE, quit)
 }
 
