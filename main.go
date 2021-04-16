@@ -48,8 +48,11 @@ func removeContents(dir string) error {
 var authenticationCode []string
 
 func main() {
-  dir := os.Getwd()
-  err := removeContents(dir + string(os.PathSeparator) + "music" + string(os.PathSeparator))
+  dir, err := os.Getwd()
+  if err != nil {
+    log.Fatal(err)
+  }
+  err = removeContents(dir + string(os.PathSeparator) + "music" + string(os.PathSeparator))
   if err != nil {
     log.Fatal(err)
   }
