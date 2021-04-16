@@ -26,7 +26,6 @@ TODO
 
 - sequence overflow handling 
 - timestamp overflow handling
-- add errors handling and errors creating
 
 */
 
@@ -46,9 +45,6 @@ type DiscordClient struct {
 	VoiceUDPIp   string
 	VoiceUDPPort int
 	SSRC         uint32
-
-	MyIp   string
-	MyPort uint16
 
 	SecretKey [32]byte
 
@@ -70,6 +66,8 @@ type DiscordClient struct {
 	muVoiceWrite sync.Mutex
 
   Sequence uint32
+
+  QuitAudioCh chan bool
 }
 
 const (
@@ -219,8 +217,16 @@ func (client *DiscordClient) readPump(conn *websocket.Conn) {
 						client.s = int(m["s"].(float64))
 					}
 					client.muS.Unlock()
-				}
-			case HEARTBEAT:
+        case "MESSAGE_CREATE":
+          msg := m["d"].(map[string]interface{})["content"]
+          switch msg {
+          case "play":
+            client.SendLambo()
+          case "stop":
+            client.QuitAudioCh <- true
+          }
+        }
+      case HEARTBEAT:
 				//
 			case IDENTIFY:
 				//
@@ -402,33 +408,6 @@ func (client *DiscordClient) readVoiceEndpoint(conn *websocket.Conn) {
         if rlen < 70 {
           log.Fatal("too short response from UDP connection")
         }
-        
-        
-        /*
-
-        buff := []byte{0, 1, 0, 70}
-        a := make([]byte, 4)
-        binary.BigEndian.PutUint32(a, uint32(client.SSRC))
-        buff = append(buff, a...)
-        for i := 0; i < 66; i++ {
-          buff = append(buff, 0)
-        }
-        _, err = conn.Write(buff)
-        time.Sleep(time.Second)
-        buff = make([]byte, 100)
-        _, err = conn.Read(buff)
-        if err != nil {
-          log.Fatal(err)
-        }
-
-        client.MyIp = string(buff[8:72])
-        client.MyPort = binary.BigEndian.Uint16(buff[72:74])
-        log.Println("my ip:", client.MyIp)
-        log.Println("my port:", client.MyPort)
-        
-        client.MyPort = uint16(i)
-        log.Println(i)
-        */
 
         var ip string
         for i := 4; i < 20; i++ {
@@ -437,11 +416,9 @@ func (client *DiscordClient) readVoiceEndpoint(conn *websocket.Conn) {
           }
           ip += string(rb[i])
         }
- 
+
         port := binary.BigEndian.Uint16(rb[68:70])
         i, _ := strconv.Atoi(strings.Split(client.UDPConn.LocalAddr().String(), ":")[1])
-        client.MyIp = ip
-        client.MyPort = port
 
         log.Println("IP:", ip)
         log.Println("PORT:", port)
@@ -455,12 +432,9 @@ func (client *DiscordClient) readVoiceEndpoint(conn *websocket.Conn) {
 				if err != nil {
 					log.Fatal(err)
 				}
-        //close := make(chan bool)
-        //go client.keepAlive(5 * time.Second, close)
       case 3:
         log.Println("OP CODE 3 RECEIVED")
 			case 4:
-        log.Println("SECRET KEY !!!!!!!!!!!!!!!!")
 				arr := [32]byte{}
 				for i, v := range m["d"].(map[string]interface{})["secret_key"].([]interface{}) {
 					arr[i] = byte(v.(float64))
@@ -469,8 +443,6 @@ func (client *DiscordClient) readVoiceEndpoint(conn *websocket.Conn) {
 				log.Println("SECRETY KEY:", client.SecretKey)
       case 5:
         log.Println("OP CODE 5 RECEIVED")
-      case 6:
-        log.Println("OP CODE 6 RECEIVED")
       case 7:
         log.Println("OP CODE 7 RECEIVED")
 			case 8:
@@ -489,32 +461,9 @@ func (client *DiscordClient) readVoiceEndpoint(conn *websocket.Conn) {
 				}()
       case 9:
         log.Println("OP CODE 9 RECEIVED")
-      default:
-        log.Fatal("ERROR")
 			}
 		}
 	}()
-}
-
-func (client *DiscordClient) keepAlive(i time.Duration, close <- chan bool) {
-  var err error
-  var sequence uint64
-  packet := make([]byte, 8)
-  tick := time.NewTicker(i)
-  defer tick.Stop()
-  for {
-    binary.LittleEndian.PutUint64(packet, sequence)
-    sequence++
-    _, err = client.UDPConn.Write(packet)
-    if err != nil {
-      log.Fatal(err)
-    }
-    select {
-    case <-tick.C:
-    case <-close:
-        return
-    }
-  }
 }
 
 type speaking struct {
@@ -533,18 +482,19 @@ func (client *DiscordClient) SendLambo() {
 	client.muVoiceWrite.Unlock()
 
   quit := make(chan bool)
+  client.QuitAudioCh = quit
   quitAudio := make(chan bool)
   dir, err := os.Getwd()
   if err != nil {
     log.Fatal(err)
   }
-  audio := client.soundEncoder(dir + string(os.PathSeparator) + "lemon", quit)
+  audio := client.soundEncoder(dir + string(os.PathSeparator) + "music" + string(os.PathSeparator) + "lemon", quit)
   go client.soundSender(audio, quitAudio, 960, SAMPLE_RATE, quit)
 }
 
+
 func (client *DiscordClient) soundEncoder(file string, quit <- chan bool) chan []byte {
   c := make(chan []byte) 
-
   
   go func() {
     pcmbuf := make([]int16, 16384)
@@ -563,11 +513,9 @@ func (client *DiscordClient) soundEncoder(file string, quit <- chan bool) chan [
     defer f.Close()
     defer s.Close()
     defer close(c)
-    log.Println("Start enncoding")
     for {
       n, err := s.Read(pcmbuf)
       if err == io.EOF {
-        log.Println("EOF")
         return
       } else if err != nil {
         log.Fatal(err)
@@ -580,7 +528,12 @@ func (client *DiscordClient) soundEncoder(file string, quit <- chan bool) chan [
           log.Fatal(err)
         }
         data = data[:n]
-        c <- data
+        select {
+        case c <- data:
+          //
+        case <-quit:
+          return
+        }
       } else if n == 0 {
         return
       }
@@ -591,7 +544,7 @@ func (client *DiscordClient) soundEncoder(file string, quit <- chan bool) chan [
 }
 
 func (client *DiscordClient) soundSender(audioChan <- chan []byte, quitAudio <-chan bool, frameSize, sampleRate int, quit <- chan bool) {
-  sequence := client.Sequence //client.SSRC
+  sequence := client.Sequence
   timestamp := uint32(rand.Intn(530))
 
   header := make([]byte, 12)
@@ -607,7 +560,6 @@ func (client *DiscordClient) soundSender(audioChan <- chan []byte, quitAudio <-c
   var recvAudio []byte
 
   
-  log.Println("Start sending")
   for {
     binary.BigEndian.PutUint32(header[8:], client.SSRC)
     binary.BigEndian.PutUint32(header[4:], timestamp)
@@ -616,10 +568,18 @@ func (client *DiscordClient) soundSender(audioChan <- chan []byte, quitAudio <-c
     select {
     case a, ok := <-audioChan:
       if !ok {
-        log.Println("End sending audio") 
+        silenceFrames := []byte{0xf8, 0xff, 0xfe, 0xf8, 0xff, 0xfe, 0xf8, 0xff, 0xfe, 0xf8, 0xff, 0xfe, 0xf8, 0xff, 0xfe}
+        copy(nonce[:12], header)
+        send := secretbox.Seal(header, silenceFrames, &nonce, &client.SecretKey) 
+
+        _, err := client.UDPConn.Write(send)
+        if err != nil {
+          log.Fatal(err)
+        }
+
         js := payload{5, speaking{0, 0, int(client.SSRC)}}
         client.muVoiceWrite.Lock()
-        err := client.VoiceConn.WriteJSON(js)
+        err = client.VoiceConn.WriteJSON(js)
         if err != nil {
           log.Fatal(err)
         }
@@ -640,6 +600,27 @@ func (client *DiscordClient) soundSender(audioChan <- chan []byte, quitAudio <-c
 
     select {
     case <-quit:
+      silenceFrames := []byte{0xf8, 0xff, 0xfe, 0xf8, 0xff, 0xfe, 0xf8, 0xff, 0xfe, 0xf8, 0xff, 0xfe, 0xf8, 0xff, 0xfe}
+      copy(nonce[:12], header)
+      send := secretbox.Seal(header, silenceFrames, &nonce, &client.SecretKey) 
+
+      _, err := client.UDPConn.Write(send)
+      if err != nil {
+        log.Fatal(err)
+      }
+
+      js := payload{5, speaking{0, 0, int(client.SSRC)}}
+      client.muVoiceWrite.Lock()
+      err = client.VoiceConn.WriteJSON(js)
+      if err != nil {
+        log.Fatal(err)
+      }
+      client.muVoiceWrite.Unlock()
+
+      client.Sequence = sequence
+
+      return
+      client.Sequence = sequence
       return
     case <-ticker.C:
       //
