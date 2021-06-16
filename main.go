@@ -57,12 +57,13 @@ func main() {
     log.Fatal(err)
   }
   
-  content, err := ioutil.ReadFile("botToken.txt")
+  content, err := ioutil.ReadFile("botToken")
   if err != nil {
     log.Fatal(err)
   }
-  botToken := string(content)
-  content, err = ioutil.ReadFile("clientId.txt")
+  botToken := string(content[:len(content)-1])
+  fmt.Println(botToken)
+  content, err = ioutil.ReadFile("clientId")
   if err != nil {
     log.Fatal(err)
   }
