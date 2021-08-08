@@ -2,12 +2,12 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
-  "log"
-  "io/ioutil"
+	"path/filepath"
 	"server.com/bot/discordClient"
-  "path/filepath"
 )
 
 func PrintMenu() {
@@ -27,47 +27,53 @@ func endpoint(w http.ResponseWriter, r *http.Request) {
 }
 
 func removeContents(dir string) error {
-    d, err := os.Open(dir)
-    if err != nil {
-        return err
-    }
-    defer d.Close()
-    names, err := d.Readdirnames(-1)
-    if err != nil {
-        return err
-    }
-    for _, name := range names {
-        err = os.RemoveAll(filepath.Join(dir, name))
-        if err != nil {
-            return err
-        }
-    }
-    return nil
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	names, err := d.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		err = os.RemoveAll(filepath.Join(dir, name))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 var authenticationCode []string
 
 func main() {
-  dir, err := os.Getwd()
-  if err != nil {
-    log.Fatal(err)
-  }
-  err = removeContents(dir + string(os.PathSeparator) + "music" + string(os.PathSeparator))
-  if err != nil {
-    log.Fatal(err)
-  }
-  
-  content, err := ioutil.ReadFile("botToken")
-  if err != nil {
-    log.Fatal(err)
-  }
-  botToken := string(content[:len(content)-1])
-  fmt.Println(botToken)
-  content, err = ioutil.ReadFile("clientId")
-  if err != nil {
-    log.Fatal(err)
-  }
-  clientId := string(content)
+	dir, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = removeContents(dir + string(os.PathSeparator) + "music" + string(os.PathSeparator))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	content, err := ioutil.ReadFile("botToken")
+	if err != nil {
+		log.Fatal(err)
+	} else if len(content) == 0 {
+		fmt.Println("botToken file is empty!")
+		return
+	}
+	botToken := string(content[:len(content)-1])
+	fmt.Println(botToken)
+	content, err = ioutil.ReadFile("clientId")
+	if err != nil {
+		log.Fatal(err)
+	} else if len(content) == 0 {
+		fmt.Println("clientId file is empty!")
+		return
+	}
+	clientId := string(content)
 	client := discordClient.NewDiscordClient(clientId, botToken)
 	go func() {
 		for {
@@ -89,7 +95,7 @@ func main() {
 				client.RetrieveVoiceServerInformation()
 				//fmt.Println("3")
 			case 4:
-        fmt.Println("PLACEHOLDER")
+				fmt.Println("PLACEHOLDER")
 				//fmt.Println("4")
 			case 5:
 				client.Close()
@@ -99,7 +105,7 @@ func main() {
 		}
 	}()
 	for {
-    c := make(chan int)
-    <-c
+		c := make(chan int)
+		<-c
 	}
 }
