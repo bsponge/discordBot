@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"log"
   "io"
+  "io/ioutil"
+  "path/filepath"
 	"math/rand"
 	"net"
 	"net/http"
@@ -92,22 +94,71 @@ const (
 	CHANNELS    = 2
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-}
-
 var gatewayUrl string
 
 func (d *DiscordClient) GetAuthLink() string {
 	return API_URL + "/oauth2/authorize?client_id=" + d.ClientId + "&scope=bot&permissions=" + PERMISSIONS + "&redirect_uri=http%3A%2F%localhost%3A8080"
 }
 
-func NewDiscordClient(clientId, botToken string) DiscordClient {
-	return DiscordClient{ClientId: clientId, BotToken: botToken}
+func createMusicDir() {
+  musicPath := filepath.Join(".", "music")
+  err := os.MkdirAll(musicPath, os.ModePerm)
+  if err != nil {
+    panic(err)
+  }
 }
 
-func (d *DiscordClient) Gateway() {
+func removeContents(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	names, err := d.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		err = os.RemoveAll(filepath.Join(dir, name))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func NewDiscordClient() DiscordClient {
+  dir, err := os.Getwd()
+  if err != nil {
+    log.Fatal(err)
+  }
+
+  createMusicDir()
+
+  err = removeContents(dir + string(os.PathSeparator) + "music" + string(os.PathSeparator))
+  if err != nil {
+    log.Fatal(err)
+  }
+
+  content, err := ioutil.ReadFile("botToken.txt")
+  if err != nil {
+    log.Fatal(err)
+  } else if len(content) == 0 {
+    panic("botToken file is empty!")
+  }
+  botToken := string(content[:len(content)-1])
+  content, err = ioutil.ReadFile("clientId.txt")
+  if err != nil {
+    log.Fatal(err)
+  } else if len(content) == 0 {
+    panic("clientId file is empty!")
+  }
+  clientId := string(content)
+
+  return DiscordClient{ClientId: clientId, BotToken: botToken}
+}
+
+func (d *DiscordClient) CreateSocketConnection() {
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", API_URL+"/gateway/bot", nil)
   if err != nil {
@@ -310,8 +361,7 @@ func (client *DiscordClient) RetrieveVoiceServerInformation() {
 
 	// TODO
 	// somehow gather channelId
-	var channelId string
-	channelId = "741230309441404952"
+  channelId := "741230309441404952"
 
 	js := payload{4, voiceStruct{client.GuildId, channelId, false, false}}
 	j, _ := json.Marshal(js)
@@ -673,6 +723,12 @@ func (client *DiscordClient) sendHeartBeatEvery(milis int) {
 }
 
 func (client *DiscordClient) Close() {
-	client.Conn.Close()
-	client.VoiceConn.Close()
+  client.muWrite.Lock()
+  if client.Conn != nil {
+    client.Conn.Close()
+  }
+  if client.VoiceConn != nil {
+    client.VoiceConn.Close()
+  }
+  client.muWrite.Unlock()
 }
