@@ -2,48 +2,53 @@ package main
 
 import (
 	"fmt"
+	"github.com/bsponge/discordBot/discordBot"
 	"net/http"
 	"os"
-	"server.com/bot/discordClient"
 )
 
 var authenticationCode []string
 
 func main() {
-  //log.SetOutput(ioutil.Discard)
+	//log.SetOutput(ioutil.Discard)
 
-	client := discordClient.NewDiscordClient()
+	client := discordBot.NewDiscordClient()
 
-  go menu(&client)
+	go menu(&client)
 
-  http.HandleFunc("/", codeEndpoint)
-  go http.ListenAndServe(":8080", nil)
+	http.HandleFunc("/", codeEndpoint)
+	go func() {
+		err := http.ListenAndServe(":8080", nil)
+		if err != nil {
 
-  	for {
+		}
+	}()
+
+	for {
 		c := make(chan int)
 		<-c
 	}
 }
 
-func menu(client *discordClient.DiscordClient) {
-  for {
-    printMenu()
-    fmt.Print("Input: ")
+func menu(client *discordBot.DiscordClient) {
+	for {
+		printMenu()
+		fmt.Print("Input: ")
 
-    var i int
-    fmt.Scanf("%d", &i)
+		var i int
+		fmt.Scanf("%d", &i)
 
-    switch i {
-    case 1:
-      client.CreateSocketConnection()
-    case 2:
-      client.RetrieveVoiceServerInformation()
-    case 3:
-      client.Close()
-      fmt.Println("Bye!")
-      os.Exit(0)
-    }
-  }
+		switch i {
+		case 1:
+			client.CreateSocketConnection()
+		case 2:
+			client.ConnectToVoiceChannel()
+		case 3:
+			client.Close()
+			fmt.Println("Bye!")
+			os.Exit(0)
+		}
+	}
 }
 
 func printMenu() {
@@ -61,7 +66,3 @@ func codeEndpoint(w http.ResponseWriter, req *http.Request) {
 func endpoint(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("Incoming request", *r)
 }
-
-
-
-
