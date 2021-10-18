@@ -42,8 +42,6 @@ func menu(client *discordBot.DiscordClient) {
 		case 1:
 			client.CreateSocketConnection()
 		case 2:
-			client.ConnectToVoiceChannel()
-		case 3:
 			client.Close()
 			fmt.Println("Bye!")
 			os.Exit(0)
@@ -52,7 +50,7 @@ func menu(client *discordBot.DiscordClient) {
 }
 
 func printMenu() {
-	list := []string{"1.INIT", "2.CONNECT TO VOICE CHANNEL", "3.QUIT"}
+	list := []string{"1.INIT", "2.QUIT"}
 	for _, v := range list {
 		fmt.Println(v)
 	}

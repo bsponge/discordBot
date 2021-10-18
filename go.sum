@@ -6,6 +6,8 @@ github.com/glendc/go-external-ip v0.0.0-20200601212049-c872357d968e/go.mod h1:o9
 github.com/gorilla/websocket v1.4.2 h1:+/TMaTYc4QFitKJxsQ7Yye35DkWvkdLcvGKqM+x0Ufc=
 github.com/gorilla/websocket v1.4.2/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/hraban/opus v0.0.0-20201025103112-d779bb1cc5a2 h1:Br/jzv+7tTaFI6z2kwI8qmn0GvVnp2oHC6x/2XE0kyY=
+github.com/mitchellh/mapstructure v1.4.2 h1:6h7AQ0yhTcIsmFmnAwQls75jp2Gzs4iB8W7pjMO+rqo=
+github.com/mitchellh/mapstructure v1.4.2/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RRV2QTWOzhPopBRo=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/pounze/ByteBuffer_golang v0.0.0-20200309033128-c060a49d6a3d h1:snZ6H7IzD0O3gX4IkhZ8HPeiQRog5LEPMyLoryRtcsw=
 github.com/pounze/ByteBuffer_golang v0.0.0-20200309033128-c060a49d6a3d/go.mod h1:n19XfAvujp32midlDN/bOGACQ08SK4thf1zYU0+QzZ0=

@@ -10,9 +10,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -71,6 +69,12 @@ type DiscordClient struct {
 	Sequence uint32
 
 	QuitAudioCh chan bool
+
+  members map[string]*member
+
+  isPlaying bool
+
+  musicQueue [][]string
 }
 
 const (
@@ -100,46 +104,7 @@ func (d *DiscordClient) GetAuthLink() string {
 	return API_URL + "/oauth2/authorize?client_id=" + d.ClientId + "&scope=bot&permissions=" + PERMISSIONS + "&redirect_uri=http%3A%2F%localhost%3A8080"
 }
 
-func createMusicDir() {
-	musicPath := filepath.Join(".", "music")
-	err := os.MkdirAll(musicPath, os.ModePerm)
-	if err != nil {
-		panic(err)
-	}
-}
-
-func removeContents(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	names, err := d.Readdirnames(-1)
-	if err != nil {
-		return err
-	}
-	for _, name := range names {
-		err = os.RemoveAll(filepath.Join(dir, name))
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func NewDiscordClient() DiscordClient {
-	dir, err := os.Getwd()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	createMusicDir()
-
-	err = removeContents(dir + string(os.PathSeparator) + "music" + string(os.PathSeparator))
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	content, err := ioutil.ReadFile("botToken.txt")
 	if err != nil {
 		log.Fatal(err)
@@ -154,8 +119,10 @@ func NewDiscordClient() DiscordClient {
 		panic("clientId file is empty!")
 	}
 	clientId := string(content)
+  members := make(map[string]*member)
+  
 
-	return DiscordClient{ClientId: clientId, BotToken: botToken}
+  return DiscordClient{ClientId: clientId, BotToken: botToken, members: members}
 }
 
 func (d *DiscordClient) CreateSocketConnection() {
@@ -212,6 +179,52 @@ func (client *DiscordClient) identify() {
 	client.muWrite.Unlock()
 }
 
+type user struct {
+  username string `json:"username"`
+  id  string `json:"id"`
+  discriminator string `json:"discriminator"`
+  avatar string `json:"avatar"`
+}
+
+type member struct {
+  user user `json:"user"`
+  mute bool `json:"mute"`
+  deaf bool `json:"deaf"`
+  roles []interface{} `json:"roles"`
+  joinedAt string `json:"joined_at"`
+  hoisedRole interface{} `json:"hoisted_role"`
+  voiceChannelId string 
+}
+
+type voiceState struct {
+  userId string `json:"user_id"`
+  channelId string `json:"channel_id"`
+}
+
+func (client *DiscordClient) updateServerInfo(guildCreateResponse map[string]interface{}) {
+  membersInterface := guildCreateResponse["d"].(map[string]interface{})["members"].([]interface{})
+  var ids []string
+  for _, v := range membersInterface {
+    ids = append(ids, v.(map[string]interface{})["user"].(map[string]interface{})["id"].(string))
+  }
+  for _, v := range ids {
+    _, ok := client.members[v]
+    if !ok {
+      client.members[v] = &member{user: user{id: v}}
+    }
+  }
+
+  voiceStates := guildCreateResponse["d"].(map[string]interface{})["voice_states"].([]interface{})
+  for _, v := range voiceStates {
+    id := v.(map[string]interface{})["user_id"].(string)
+    _, ok := client.members[id]
+    if ok {
+      m := client.members[id]
+      m.voiceChannelId = v.(map[string]interface{})["channel_id"].(string)
+    }
+  }
+}
+
 func (client *DiscordClient) readPump(conn *websocket.Conn) {
 	go func() {
 		for {
@@ -242,6 +255,7 @@ func (client *DiscordClient) readPump(conn *websocket.Conn) {
 					client.muS.Unlock()
 				case "GUILD_CREATE":
 					client.ServerId = m["d"].(map[string]interface{})["id"].(string)
+          client.updateServerInfo(m)
 					client.muS.Lock()
 					if m["s"] == nil {
 						client.s = 0
@@ -272,13 +286,18 @@ func (client *DiscordClient) readPump(conn *websocket.Conn) {
 				case "MESSAGE_CREATE":
 					msg := m["d"].(map[string]interface{})["content"].(string)
 					action := strings.Split(msg, " ")
+
 					switch action[0] {
 					case "play":
 						if len(action) > 1 {
-							client.SendAudio(action[1:])
+							userId := m["d"].(map[string]interface{})["author"].(map[string]interface{})["id"].(string)
+              voiceChannelId := client.members[userId].voiceChannelId
+              if client.VoiceConn == nil {
+                client.ConnectToVoiceChannel(voiceChannelId)
+              }
+							go client.SendAudio(action[1:])
 						}
 					case "stop":
-            log.Println("STOPPING")
 						client.QuitAudioCh <- true
 					}
 				}
@@ -346,11 +365,17 @@ type voiceStruct struct {
 	SelfDeaf  bool   `json:"self_deaf"`
 }
 
-func (client *DiscordClient) ConnectToVoiceChannel() {
+func (client *DiscordClient) ConnectToVoiceChannel(channelId string) {
 	httpclient := &http.Client{}
-	req, _ := http.NewRequest("GET", API_URL+"/users/@me/guilds", nil)
+	req, err := http.NewRequest("GET", API_URL+"/users/@me/guilds", nil)
+	if err != nil {
+		panic(err)
+	}
 	req.Header.Add("Authorization", "Bot "+client.BotToken)
-	res, _ := httpclient.Do(req)
+	res, err := httpclient.Do(req)
+	if err != nil {
+		panic(err)
+	}
 	buf := new(bytes.Buffer)
 	buf.ReadFrom(res.Body)
 	newStr := buf.String()
@@ -360,17 +385,19 @@ func (client *DiscordClient) ConnectToVoiceChannel() {
 
 	client.GuildId = result["id"].(string)
 
-	// TODO
-	// somehow gather channelId
-	channelId := "741230309441404952"
-
 	js := payload{4, voiceStruct{client.GuildId, channelId, false, false}}
-	j, _ := json.Marshal(js)
+	j, err := json.Marshal(js)
+	if err != nil {
+		panic(err)
+	}
 	log.Println(string(j))
 
 	client.muWrite.Lock()
-	client.Conn.WriteJSON(js)
+	err = client.Conn.WriteJSON(js)
 	client.muWrite.Unlock()
+	if err != nil {
+		panic(err)
+	}
 }
 
 type voiceConnStruct struct {
@@ -382,6 +409,7 @@ type voiceConnStruct struct {
 
 func (client *DiscordClient) ConnectToVoiceEndpoint() {
 	client.ServerId = "741230309441404948"
+	log.Println("CONNECT TO VOICE ENDPOITN", client.VoiceEndpoint)
 	conn, _, err := websocket.DefaultDialer.Dial("wss://"+client.VoiceEndpoint[:len(client.VoiceEndpoint)]+"?v=4", nil)
 	client.VoiceConn = conn
 	if err != nil {
@@ -390,9 +418,7 @@ func (client *DiscordClient) ConnectToVoiceEndpoint() {
 
 	js := payload{0, voiceConnStruct{client.ServerId, client.UserId, client.SessionId, client.Token}}
 
-	client.muVoiceWrite.Lock()
 	client.VoiceConn.WriteJSON(js)
-	client.muVoiceWrite.Unlock()
 
 	client.readVoiceEndpoint(client.VoiceConn)
 }
@@ -536,19 +562,20 @@ type speaking struct {
 
 func (client *DiscordClient) SendAudio(videoName []string) {
 	fileName := strings.Join(videoName, " ")
-  log.Println(fileName)
-  args := []string{"--get-url", "-f", "250", "ytsearch:" + fileName}
+	log.Println(fileName)
+	args := []string{"--get-url", "-f", "250", "ytsearch:" + fileName}
 	cmd := exec.Command("youtube-dl", args...)
-  stdout, err := cmd.Output()
+	stdout, err := cmd.Output()
 	if err != nil {
-    log.Println("Youtube-dl error")
+		log.Fatal("Youtube-dl error")
 	}
 
 	js := payload{5, speaking{5, 0, 0}}
+
 	client.muVoiceWrite.Lock()
 	err = client.VoiceConn.WriteJSON(js)
 	if err != nil {
-    log.Println("voiceConn write json error")
+		log.Println("voiceConn write json error")
 		log.Fatal(err)
 	}
 	client.muVoiceWrite.Unlock()
@@ -557,10 +584,8 @@ func (client *DiscordClient) SendAudio(videoName []string) {
 	client.QuitAudioCh = quit
 	quitAudio := make(chan bool)
 
-  _ = stdout
-  // TODO FIX ME 
-  audioC := client.soundEncoder(string(stdout[:len(stdout)-1]), quit)
-	go client.soundSender(audioC, quitAudio, 960, SAMPLE_RATE, quit)
+	audioC := client.soundEncoder(string(stdout[:len(stdout)-1]), quit)
+	client.soundSender(audioC, quitAudio, 960, SAMPLE_RATE, quit)
 }
 
 func (client *DiscordClient) soundEncoder(url string, quit <-chan bool) chan []byte {
