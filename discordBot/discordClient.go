@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"io"
 	"io/ioutil"
 	"log"
 	"math/rand"
-  "io"
 	"net"
 	"net/http"
 	"os"
@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-  "gopkg.in/hraban/opus.v2"
 	"golang.org/x/crypto/nacl/secretbox"
+	"gopkg.in/hraban/opus.v2"
 	"strings"
 )
 
@@ -537,7 +537,7 @@ type speaking struct {
 func (client *DiscordClient) SendAudio(videoName []string) {
 	fileName := strings.Join(videoName, " ")
   log.Println(fileName)
-  args := []string{"--get-url", "-f", "250", "\"ytsearch:" + fileName + "\""}
+  args := []string{"--get-url", "-f", "250", "ytsearch:" + fileName}
 	cmd := exec.Command("youtube-dl", args...)
   stdout, err := cmd.Output()
 	if err != nil {
@@ -559,7 +559,7 @@ func (client *DiscordClient) SendAudio(videoName []string) {
 
   _ = stdout
   // TODO FIX ME 
-  audioC := client.soundEncoder("https://r1---sn-f5f7lnee.googlevideo.com/videoplayback?expire=1634320293&ei=RWtpYcLoGoug7QSomoSgAw&ip=2a02%3Aa31a%3Aa03d%3A4e80%3A14c2%3A4fe2%3A5046%3A7e07&id=o-AB5IjjNhDIyC8y4rY-LW_Pf-jt36_FsldxqE3qkrh1r4&itag=250&source=youtube&requiressl=yes&mh=JL&mm=31%2C29&mn=sn-f5f7lnee%2Csn-f5f7kn7e&ms=au%2Crdu&mv=m&mvi=1&pl=46&initcwndbps=1517500&vprv=1&mime=audio%2Fwebm&ns=IrDMU4BAx4HHgO_raMEIrzcG&gir=yes&clen=440012&dur=51.761&lmt=1612993733143847&mt=1634298326&fvip=1&keepalive=yes&fexp=24001373%2C24007246&c=WEB&txp=1432434&n=SIAhAJdUqhKPaqhdYg&sparams=expire%2Cei%2Cip%2Cid%2Citag%2Csource%2Crequiressl%2Cvprv%2Cmime%2Cns%2Cgir%2Cclen%2Cdur%2Clmt&sig=AOq0QJ8wRAIgCA2su0NXLq8m1TYu_snRXZSH9r3ElJUPKCUf4iXysNsCIEkUTMOO9p33vlUp3Fq_tP_O5xSxNIAmaYwTwbEoOYWc&lsparams=mh%2Cmm%2Cmn%2Cms%2Cmv%2Cmvi%2Cpl%2Cinitcwndbps&lsig=AG3C_xAwRgIhALol36Eqw4DQa15gx1nmIv78qcPc5pufANPxW3epHtBNAiEAwGSxh49VhgmpjQVMTpQn0fBdZhnx8N_qQ7tKVkZMxFs%3D", quit)
+  audioC := client.soundEncoder(string(stdout[:len(stdout)-1]), quit)
 	go client.soundSender(audioC, quitAudio, 960, SAMPLE_RATE, quit)
 }
 
@@ -570,28 +570,26 @@ func (client *DiscordClient) soundEncoder(url string, quit <-chan bool) chan []b
 		pcmbuf := make([]int16, 16384)
 		enc, err := opus.NewEncoder(48000, 2, opus.AppAudio)
 		if err != nil {
-      log.Println("Cannot create opus encoder")
+			log.Println("Cannot create opus encoder")
 			log.Fatal(err)
 		}
-    audioReader := ReadAudioFromUrl(url)
+		audioReader := ReadAudioFromUrl(url)
 		s, err := opus.NewStream(audioReader)
 		if err != nil {
-      log.Println("Cannot create new opus stream")
+			log.Println("Cannot create new opus stream")
 			log.Fatal(err)
 		}
 		defer s.Close()
 		defer close(c)
 		for {
 			n, err := s.Read(pcmbuf)
-			log.Println("READ", n)
 			if err == io.EOF {
 				return
 			} else if err != nil {
-        log.Println("Cannot read from opus stream")
+				log.Println("Cannot read from opus stream")
 				log.Fatal(err)
 			}
 			if n == 960 {
-				log.Println("SENDING")
 				pcm := pcmbuf[:n*CHANNELS]
 				data := make([]byte, 2000)
 				n, err = enc.Encode(pcm, data)
@@ -601,7 +599,6 @@ func (client *DiscordClient) soundEncoder(url string, quit <-chan bool) chan []b
 				data = data[:n]
 				select {
 				case c <- data:
-					log.Println("SENT")
 				case <-quit:
 					return
 				}
