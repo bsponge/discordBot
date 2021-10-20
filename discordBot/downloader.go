@@ -1,9 +1,9 @@
 package discordBot
 
 import (
-  "fmt"
   "github.com/xfrr/goffmpeg/transcoder"
   "io"
+  "log"
   "net/http"
 )
 
@@ -34,12 +34,12 @@ func ReadAudioFromUrl(url string) io.Reader {
     panic(err)
   }
 
-  buffer := make([]byte, 3000)
+  buffer := make([]byte, 7000)
   go func() {
     defer func(w *io.PipeWriter) {
       err := w.Close()
       if err != nil {
-        fmt.Println(err)
+        log.Println(err)
       }
     }(w)
     for {
@@ -48,7 +48,7 @@ func ReadAudioFromUrl(url string) io.Reader {
         return
       }
       if err != nil {
-        panic(err)
+        return
       }
       n, err = w.Write(buffer[:n])
       if err != nil {

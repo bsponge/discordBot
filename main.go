@@ -7,11 +7,7 @@ import (
 	"os"
 )
 
-var authenticationCode []string
-
 func main() {
-	//log.SetOutput(ioutil.Discard)
-
 	client := discordBot.NewDiscordClient()
 
 	go menu(&client)
@@ -36,7 +32,10 @@ func menu(client *discordBot.DiscordClient) {
 		fmt.Print("Input: ")
 
 		var i int
-		fmt.Scanf("%d", &i)
+		_, err := fmt.Scanf("%d", &i)
+		if err != nil {
+			return 
+		}
 
 		switch i {
 		case 1:
@@ -58,7 +57,7 @@ func printMenu() {
 
 func codeEndpoint(w http.ResponseWriter, req *http.Request) {
 	fmt.Println(req.URL.Query())
-	authenticationCode, _ = req.URL.Query()["code"]
+	_, _ = req.URL.Query()["code"]
 }
 
 func endpoint(w http.ResponseWriter, r *http.Request) {

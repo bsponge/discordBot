@@ -70,11 +70,11 @@ type DiscordClient struct {
 
 	QuitAudioCh chan bool
 
-  members map[string]*member
+	members map[string]*member
 
-  isPlaying bool
+	isPlaying bool
 
-  musicQueue [][]string
+	musicQueue [][]string
 }
 
 const (
@@ -100,8 +100,8 @@ const (
 
 var gatewayUrl string
 
-func (d *DiscordClient) GetAuthLink() string {
-	return API_URL + "/oauth2/authorize?client_id=" + d.ClientId + "&scope=bot&permissions=" + PERMISSIONS + "&redirect_uri=http%3A%2F%localhost%3A8080"
+func (client *DiscordClient) GetAuthLink() string {
+	return API_URL + "/oauth2/authorize?client_id=" + client.ClientId + "&scope=bot&permissions=" + PERMISSIONS + "&redirect_uri=http%3A%2F%localhost%3A8080"
 }
 
 func NewDiscordClient() DiscordClient {
@@ -119,28 +119,33 @@ func NewDiscordClient() DiscordClient {
 		panic("clientId file is empty!")
 	}
 	clientId := string(content)
-  members := make(map[string]*member)
-  
+	members := make(map[string]*member)
 
-  return DiscordClient{ClientId: clientId, BotToken: botToken, members: members}
+	return DiscordClient{ClientId: clientId, BotToken: botToken, members: members}
 }
 
-func (d *DiscordClient) CreateSocketConnection() {
-	client := &http.Client{}
+func (client *DiscordClient) CreateSocketConnection() {
+	httpClient := &http.Client{}
 	req, err := http.NewRequest("GET", API_URL+"/gateway/bot", nil)
 	if err != nil {
 		log.Fatal(err)
 	}
-	req.Header.Add("Authorization", "Bot "+d.BotToken)
-	res, err := client.Do(req)
+	req.Header.Add("Authorization", "Bot "+client.BotToken)
+	res, err := httpClient.Do(req)
 	if err != nil {
 		log.Fatal(err)
 	}
 	buf := new(bytes.Buffer)
-	buf.ReadFrom(res.Body)
+	_, err = buf.ReadFrom(res.Body)
+	if err != nil {
+		log.Println(err)
+	}
 	newStr := buf.String()
 	var result map[string]interface{}
-	json.Unmarshal([]byte(newStr), &result)
+	err = json.Unmarshal([]byte(newStr), &result)
+	if err != nil {
+		log.Println(err)
+	}
 
 	gatewayUrl = result["url"].(string)
 	log.Println("Connecting to", gatewayUrl)
@@ -151,9 +156,9 @@ func (d *DiscordClient) CreateSocketConnection() {
 		log.Fatal("dial:", err)
 	}
 
-	d.Conn = conn
+	client.Conn = conn
 
-	d.readPump(d.Conn)
+	client.readPump(client.Conn)
 }
 
 type payload struct {
@@ -175,54 +180,52 @@ type properties struct {
 func (client *DiscordClient) identify() {
 	js := payload{2, d{client.BotToken, properties{"linux", "lib", "lib"}}}
 	client.muWrite.Lock()
-	client.Conn.WriteJSON(js)
+	err := client.Conn.WriteJSON(js)
 	client.muWrite.Unlock()
+	if err != nil {
+		log.Println(err)
+	}
 }
 
 type user struct {
-  username string `json:"username"`
-  id  string `json:"id"`
-  discriminator string `json:"discriminator"`
-  avatar string `json:"avatar"`
+	Username      string `json:"username"`
+	Id            string `json:"id"`
+	Discriminator string `json:"discriminator"`
+	Avatar        string `json:"avatar"`
 }
 
 type member struct {
-  user user `json:"user"`
-  mute bool `json:"mute"`
-  deaf bool `json:"deaf"`
-  roles []interface{} `json:"roles"`
-  joinedAt string `json:"joined_at"`
-  hoisedRole interface{} `json:"hoisted_role"`
-  voiceChannelId string 
-}
-
-type voiceState struct {
-  userId string `json:"user_id"`
-  channelId string `json:"channel_id"`
+	User user `json:"user"`
+	Mute  bool          `json:"mute"`
+	Deaf     bool          `json:"deaf"`
+	Roles      []interface{} `json:"roles"`
+	JoinedAt       string      `json:"joined_at"`
+	HoisedRole     interface{} `json:"hoisted_role"`
+	voiceChannelId string
 }
 
 func (client *DiscordClient) updateServerInfo(guildCreateResponse map[string]interface{}) {
-  membersInterface := guildCreateResponse["d"].(map[string]interface{})["members"].([]interface{})
-  var ids []string
-  for _, v := range membersInterface {
-    ids = append(ids, v.(map[string]interface{})["user"].(map[string]interface{})["id"].(string))
-  }
-  for _, v := range ids {
-    _, ok := client.members[v]
-    if !ok {
-      client.members[v] = &member{user: user{id: v}}
-    }
-  }
+	membersInterface := guildCreateResponse["d"].(map[string]interface{})["members"].([]interface{})
+	var ids []string
+	for _, v := range membersInterface {
+		ids = append(ids, v.(map[string]interface{})["user"].(map[string]interface{})["id"].(string))
+	}
+	for _, v := range ids {
+		_, ok := client.members[v]
+		if !ok {
+			client.members[v] = &member{User: user{Id: v}}
+		}
+	}
 
-  voiceStates := guildCreateResponse["d"].(map[string]interface{})["voice_states"].([]interface{})
-  for _, v := range voiceStates {
-    id := v.(map[string]interface{})["user_id"].(string)
-    _, ok := client.members[id]
-    if ok {
-      m := client.members[id]
-      m.voiceChannelId = v.(map[string]interface{})["channel_id"].(string)
-    }
-  }
+	voiceStates := guildCreateResponse["d"].(map[string]interface{})["voice_states"].([]interface{})
+	for _, v := range voiceStates {
+		id := v.(map[string]interface{})["user_id"].(string)
+		_, ok := client.members[id]
+		if ok {
+			m := client.members[id]
+			m.voiceChannelId = v.(map[string]interface{})["channel_id"].(string)
+		}
+	}
 }
 
 func (client *DiscordClient) readPump(conn *websocket.Conn) {
@@ -237,7 +240,10 @@ func (client *DiscordClient) readPump(conn *websocket.Conn) {
 				return
 			}
 			var m map[string]interface{}
-			json.Unmarshal(message, &m)
+			err = json.Unmarshal(message, &m)
+			if err != nil {
+				return
+			}
 			log.Println("recv:", string(message))
 			switch int(m["op"].(float64)) {
 			case DISPATCH:
@@ -255,7 +261,7 @@ func (client *DiscordClient) readPump(conn *websocket.Conn) {
 					client.muS.Unlock()
 				case "GUILD_CREATE":
 					client.ServerId = m["d"].(map[string]interface{})["id"].(string)
-          client.updateServerInfo(m)
+					client.updateServerInfo(m)
 					client.muS.Lock()
 					if m["s"] == nil {
 						client.s = 0
@@ -291,11 +297,14 @@ func (client *DiscordClient) readPump(conn *websocket.Conn) {
 					case "play":
 						if len(action) > 1 {
 							userId := m["d"].(map[string]interface{})["author"].(map[string]interface{})["id"].(string)
-              voiceChannelId := client.members[userId].voiceChannelId
-              if client.VoiceConn == nil {
-                client.ConnectToVoiceChannel(voiceChannelId)
-              }
-							go client.SendAudio(action[1:])
+							voiceChannelId := client.members[userId].voiceChannelId
+							client.musicQueue = append(client.musicQueue, action[1:])
+							if client.VoiceConn == nil {
+								client.ConnectToVoiceChannel(voiceChannelId)
+							}
+							if len(client.musicQueue) == 1 {
+								go client.SendAudio(action[1:])
+							}
 						}
 					case "stop":
 						client.QuitAudioCh <- true
@@ -347,15 +356,17 @@ func (client *DiscordClient) GetVoiceRegions() {
 	req.Header.Add("Authorization", "Bot "+client.BotToken)
 	res, _ := httpclient.Do(req)
 	buf := new(bytes.Buffer)
-	buf.ReadFrom(res.Body)
+	_, err := buf.ReadFrom(res.Body)
+	if err != nil {
+		return
+	}
 	newStr := buf.String()
 	var result map[string]interface{}
-	json.Unmarshal([]byte(newStr), &result)
+	err = json.Unmarshal([]byte(newStr), &result)
+	if err != nil {
+		log.Println(err)
+	}
 
-}
-
-type wrap struct {
-	v voiceStruct `json:"d"`
 }
 
 type voiceStruct struct {
@@ -377,11 +388,17 @@ func (client *DiscordClient) ConnectToVoiceChannel(channelId string) {
 		panic(err)
 	}
 	buf := new(bytes.Buffer)
-	buf.ReadFrom(res.Body)
+	_, err = buf.ReadFrom(res.Body)
+	if err != nil {
+		return
+	}
 	newStr := buf.String()
 	newStr = newStr[1 : len(newStr)-1]
 	var result map[string]interface{}
-	json.Unmarshal([]byte(newStr), &result)
+	err = json.Unmarshal([]byte(newStr), &result)
+	if err != nil {
+		return
+	}
 
 	client.GuildId = result["id"].(string)
 
@@ -418,7 +435,10 @@ func (client *DiscordClient) ConnectToVoiceEndpoint() {
 
 	js := payload{0, voiceConnStruct{client.ServerId, client.UserId, client.SessionId, client.Token}}
 
-	client.VoiceConn.WriteJSON(js)
+	err = client.VoiceConn.WriteJSON(js)
+	if err != nil {
+		log.Println(err)
+	}
 
 	client.readVoiceEndpoint(client.VoiceConn)
 }
@@ -436,7 +456,12 @@ type Data struct {
 
 func (client *DiscordClient) readVoiceEndpoint(conn *websocket.Conn) {
 	go func() {
-		defer client.Conn.Close()
+		defer func(Conn *websocket.Conn) {
+			err := Conn.Close()
+			if err != nil {
+				log.Println(err)
+			}
+		}(client.Conn)
 		for {
 
 			client.muVoiceRead.Lock()
@@ -447,9 +472,11 @@ func (client *DiscordClient) readVoiceEndpoint(conn *websocket.Conn) {
 			}
 
 			var m map[string]interface{}
-			json.Unmarshal(message, &m)
+			err = json.Unmarshal(message, &m)
+			if err != nil {
+				log.Println(err)
+			}
 			log.Println("voice endpoint recv:", string(message))
-			log.Println()
 
 			switch int(m["op"].(float64)) {
 			case 0:
@@ -528,7 +555,7 @@ func (client *DiscordClient) readVoiceEndpoint(conn *websocket.Conn) {
 					arr[i] = byte(v.(float64))
 				}
 				client.SecretKey = arr
-				log.Println("SECRETY KEY:", client.SecretKey)
+				log.Println("SECRET KEY:", client.SecretKey)
 			case 5:
 				log.Println("OP CODE 5 RECEIVED")
 			case 7:
@@ -556,24 +583,28 @@ func (client *DiscordClient) readVoiceEndpoint(conn *websocket.Conn) {
 
 type speaking struct {
 	Speaking int `json:"speaking"`
-	Dealy    int `json:"delay"`
+	Delay    int `json:"delay"`
 	Ssrc     int `json:"ssrc"`
 }
 
-func (client *DiscordClient) SendAudio(videoName []string) {
+func getAudioUrl(videoName []string) []byte {
 	fileName := strings.Join(videoName, " ")
-	log.Println(fileName)
 	args := []string{"--get-url", "-f", "250", "ytsearch:" + fileName}
 	cmd := exec.Command("youtube-dl", args...)
 	stdout, err := cmd.Output()
 	if err != nil {
 		log.Fatal("Youtube-dl error")
 	}
+	return stdout
+}
+
+func (client *DiscordClient) SendAudio(videoName []string) {
+	stdout := getAudioUrl(videoName)
 
 	js := payload{5, speaking{5, 0, 0}}
 
 	client.muVoiceWrite.Lock()
-	err = client.VoiceConn.WriteJSON(js)
+	err := client.VoiceConn.WriteJSON(js)
 	if err != nil {
 		log.Println("voiceConn write json error")
 		log.Fatal(err)
@@ -588,7 +619,7 @@ func (client *DiscordClient) SendAudio(videoName []string) {
 	client.soundSender(audioC, quitAudio, 960, SAMPLE_RATE, quit)
 }
 
-func (client *DiscordClient) soundEncoder(url string, quit <-chan bool) chan []byte {
+func (client *DiscordClient) soundEncoder(url string, quit chan bool) chan []byte {
 	c := make(chan []byte)
 
 	go func() {
@@ -602,9 +633,15 @@ func (client *DiscordClient) soundEncoder(url string, quit <-chan bool) chan []b
 		s, err := opus.NewStream(audioReader)
 		if err != nil {
 			log.Println("Cannot create new opus stream")
-			log.Fatal(err)
+			quit <- true
+			return
 		}
-		defer s.Close()
+		defer func(s *opus.Stream) {
+			err := s.Close()
+			if err != nil {
+				log.Println(err)
+			}
+		}(s)
 		defer close(c)
 		for {
 			n, err := s.Read(pcmbuf)
@@ -651,6 +688,18 @@ func (client *DiscordClient) soundSender(audioChan <-chan []byte, quitAudio <-ch
 	ticker := time.NewTicker(time.Millisecond * time.Duration(timeIncr))
 
 	var recvAudio []byte
+
+	defer func() {
+		queueLength := len(client.musicQueue)
+		if queueLength == 1 {
+			client.musicQueue = client.musicQueue[1:]
+		} else if queueLength > 0 {
+			videoName := client.musicQueue[0]
+			client.musicQueue = client.musicQueue[1:]
+			client.SendAudio(videoName)
+		}
+		log.Println("MUSIC QUEUE", client.musicQueue)
+	}()
 
 	for {
 		binary.BigEndian.PutUint32(header[8:], client.SSRC)
@@ -708,10 +757,6 @@ func (client *DiscordClient) soundSender(audioChan <-chan []byte, quitAudio <-ch
 				log.Fatal(err)
 			}
 			client.muVoiceWrite.Unlock()
-
-			client.Sequence = sequence
-
-			return
 			client.Sequence = sequence
 			return
 		case <-ticker.C:
@@ -753,10 +798,16 @@ func (client *DiscordClient) sendHeartBeatEvery(milis int) {
 func (client *DiscordClient) Close() {
 	client.muWrite.Lock()
 	if client.Conn != nil {
-		client.Conn.Close()
+		err := client.Conn.Close()
+		if err != nil {
+			log.Println(err)
+		}
 	}
 	if client.VoiceConn != nil {
-		client.VoiceConn.Close()
+		err := client.VoiceConn.Close()
+		if err != nil {
+			log.Println(err)
+		}
 	}
 	client.muWrite.Unlock()
 }
