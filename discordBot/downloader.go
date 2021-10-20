@@ -48,11 +48,13 @@ func ReadAudioFromUrl(url string) io.Reader {
         return
       }
       if err != nil {
+        log.Println(err)
         return
       }
       n, err = w.Write(buffer[:n])
       if err != nil {
-        panic(err)
+        log.Println(err)
+        return
       }
     }
   }()

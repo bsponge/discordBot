@@ -72,9 +72,8 @@ type DiscordClient struct {
 
 	members map[string]*member
 
-	isPlaying bool
-
-	musicQueue [][]string
+	musicQueue chan []string
+	finishedPlaying chan bool
 }
 
 const (
@@ -120,8 +119,10 @@ func NewDiscordClient() DiscordClient {
 	}
 	clientId := string(content)
 	members := make(map[string]*member)
+	musicQueue := make(chan []string)
+	finishedPlaying := make(chan bool, 1)
 
-	return DiscordClient{ClientId: clientId, BotToken: botToken, members: members}
+	return DiscordClient{ClientId: clientId, BotToken: botToken, members: members, musicQueue: musicQueue, finishedPlaying: finishedPlaying}
 }
 
 func (client *DiscordClient) CreateSocketConnection() {
@@ -296,17 +297,16 @@ func (client *DiscordClient) readPump(conn *websocket.Conn) {
 					switch action[0] {
 					case "play":
 						if len(action) > 1 {
+							go client.listenForMusicRequests()
 							userId := m["d"].(map[string]interface{})["author"].(map[string]interface{})["id"].(string)
 							voiceChannelId := client.members[userId].voiceChannelId
-							client.musicQueue = append(client.musicQueue, action[1:])
+							client.musicQueue <- action[1:]
 							if client.VoiceConn == nil {
 								client.ConnectToVoiceChannel(voiceChannelId)
-							}
-							if len(client.musicQueue) == 1 {
-								go client.SendAudio(action[1:])
+								client.finishedPlaying <- true
 							}
 						}
-					case "stop":
+					case "skip":
 						client.QuitAudioCh <- true
 					}
 				}
@@ -348,6 +348,14 @@ func (client *DiscordClient) readPump(conn *websocket.Conn) {
 			}
 		}
 	}()
+}
+
+func (client *DiscordClient) listenForMusicRequests() {
+	for {
+		request := <-client.musicQueue
+		<-client.finishedPlaying
+		go client.SendAudio(request)
+	}
 }
 
 func (client *DiscordClient) GetVoiceRegions() {
@@ -426,7 +434,7 @@ type voiceConnStruct struct {
 
 func (client *DiscordClient) ConnectToVoiceEndpoint() {
 	client.ServerId = "741230309441404948"
-	log.Println("CONNECT TO VOICE ENDPOITN", client.VoiceEndpoint)
+	log.Println("CONNECT TO VOICE ENDPOINT", client.VoiceEndpoint)
 	conn, _, err := websocket.DefaultDialer.Dial("wss://"+client.VoiceEndpoint[:len(client.VoiceEndpoint)]+"?v=4", nil)
 	client.VoiceConn = conn
 	if err != nil {
@@ -622,7 +630,7 @@ func (client *DiscordClient) SendAudio(videoName []string) {
 func (client *DiscordClient) soundEncoder(url string, quit chan bool) chan []byte {
 	c := make(chan []byte)
 
-	go func() {
+	go func(client *DiscordClient) {
 		pcmbuf := make([]int16, 16384)
 		enc, err := opus.NewEncoder(48000, 2, opus.AppAudio)
 		if err != nil {
@@ -634,6 +642,7 @@ func (client *DiscordClient) soundEncoder(url string, quit chan bool) chan []byt
 		if err != nil {
 			log.Println("Cannot create new opus stream")
 			quit <- true
+			client.finishedPlaying <- true
 			return
 		}
 		defer func(s *opus.Stream) {
@@ -668,7 +677,7 @@ func (client *DiscordClient) soundEncoder(url string, quit chan bool) chan []byt
 				return
 			}
 		}
-	}()
+	}(client)
 
 	return c
 }
@@ -689,17 +698,9 @@ func (client *DiscordClient) soundSender(audioChan <-chan []byte, quitAudio <-ch
 
 	var recvAudio []byte
 
-	defer func() {
-		queueLength := len(client.musicQueue)
-		if queueLength == 1 {
-			client.musicQueue = client.musicQueue[1:]
-		} else if queueLength > 0 {
-			videoName := client.musicQueue[0]
-			client.musicQueue = client.musicQueue[1:]
-			client.SendAudio(videoName)
-		}
-		log.Println("MUSIC QUEUE", client.musicQueue)
-	}()
+	defer func(client *DiscordClient) {
+		client.finishedPlaying <- true
+	}(client)
 
 	for {
 		binary.BigEndian.PutUint32(header[8:], client.SSRC)
@@ -810,4 +811,6 @@ func (client *DiscordClient) Close() {
 		}
 	}
 	client.muWrite.Unlock()
+	close(client.musicQueue)
+	close(client.finishedPlaying)
 }
