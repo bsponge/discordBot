@@ -32,8 +32,8 @@ func menu(client *discordBot.DiscordClient) {
 		fmt.Print("Input: ")
 
 		var i int
-		_, err := fmt.Scanf("%d", &i)
-		if err != nil {
+		_, i2 := fmt.Scanf("%d", &i)
+		if i2 != nil {
 			return 
 		}
 

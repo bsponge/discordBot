@@ -206,9 +206,9 @@ type member struct {
 }
 
 func (client *DiscordClient) updateServerInfo(guildCreateResponse map[string]interface{}) {
-	membersInterface := guildCreateResponse["d"].(map[string]interface{})["members"].([]interface{})
+	members := guildCreateResponse["d"].(map[string]interface{})["members"].([]interface{})
 	var ids []string
-	for _, v := range membersInterface {
+	for _, v := range members {
 		ids = append(ids, v.(map[string]interface{})["user"].(map[string]interface{})["id"].(string))
 	}
 	for _, v := range ids {
@@ -245,71 +245,10 @@ func (client *DiscordClient) readPump(conn *websocket.Conn) {
 			if err != nil {
 				return
 			}
-			log.Println("recv:", string(message))
+			log.Println("received:", string(message))
 			switch int(m["op"].(float64)) {
 			case DISPATCH:
-				t := m["t"].(string)
-				switch t {
-				case "READY":
-					client.UserId = m["d"].(map[string]interface{})["user"].(map[string]interface{})["id"].(string)
-					client.SessionId = m["d"].(map[string]interface{})["session_id"].(string)
-					client.muS.Lock()
-					if m["s"] == nil {
-						client.s = 0
-					} else {
-						client.s = int(m["s"].(float64))
-					}
-					client.muS.Unlock()
-				case "GUILD_CREATE":
-					client.ServerId = m["d"].(map[string]interface{})["id"].(string)
-					client.updateServerInfo(m)
-					client.muS.Lock()
-					if m["s"] == nil {
-						client.s = 0
-					} else {
-						client.s = int(m["s"].(float64))
-					}
-					client.muS.Unlock()
-				case "VOICE_SERVER_UPDATE":
-					client.VoiceEndpoint = m["d"].(map[string]interface{})["endpoint"].(string)
-					client.Token = m["d"].(map[string]interface{})["token"].(string)
-					client.muS.Lock()
-					if m["s"] == nil {
-						client.s = 0
-					} else {
-						client.s = int(m["s"].(float64))
-					}
-					client.muS.Unlock()
-					client.ConnectToVoiceEndpoint()
-				case "VOICE_STATE_UPDATE":
-					client.SessionId = m["d"].(map[string]interface{})["session_id"].(string)
-					client.muS.Lock()
-					if m["s"] == nil {
-						client.s = 0
-					} else {
-						client.s = int(m["s"].(float64))
-					}
-					client.muS.Unlock()
-				case "MESSAGE_CREATE":
-					msg := m["d"].(map[string]interface{})["content"].(string)
-					action := strings.Split(msg, " ")
-
-					switch action[0] {
-					case "play":
-						if len(action) > 1 {
-							go client.listenForMusicRequests()
-							userId := m["d"].(map[string]interface{})["author"].(map[string]interface{})["id"].(string)
-							voiceChannelId := client.members[userId].voiceChannelId
-							client.musicQueue <- action[1:]
-							if client.VoiceConn == nil {
-								client.ConnectToVoiceChannel(voiceChannelId)
-								client.finishedPlaying <- true
-							}
-						}
-					case "skip":
-						client.QuitAudioCh <- true
-					}
-				}
+				client.handleDispatch(m)
 			case HEARTBEAT:
 				//
 			case IDENTIFY:
@@ -327,24 +266,9 @@ func (client *DiscordClient) readPump(conn *websocket.Conn) {
 			case INVALID_SESSION:
 				//
 			case HELLO:
-				client.HeartBeatInterval = int(m["d"].(map[string]interface{})["heartbeat_interval"].(float64))
-				client.identify()
-				go client.sendHeartBeatEvery(client.HeartBeatInterval)
-				client.muS.Lock()
-				if m["s"] == nil {
-					client.s = 0
-				} else {
-					client.s = int(m["s"].(float64))
-				}
-				client.muS.Unlock()
+				client.handleHello(m)
 			case HEARTBEAT_ACK:
-				client.muS.Lock()
-				if m["s"] == nil {
-					client.s = 0
-				} else {
-					client.s = int(m["s"].(float64))
-				}
-				client.muS.Unlock()
+				client.handleHeartbeatAck(m)
 			}
 		}
 	}()
@@ -488,9 +412,9 @@ func (client *DiscordClient) readVoiceEndpoint(conn *websocket.Conn) {
 
 			switch int(m["op"].(float64)) {
 			case 0:
-				log.Println("OP CODE 0 RECEIVED")
+				//
 			case 1:
-				log.Println("OP CODE 1 RECEIVED")
+				//
 			case 2:
 				client.VoiceUDPIp = m["d"].(map[string]interface{})["ip"].(string)
 				client.VoiceUDPPort = int(m["d"].(map[string]interface{})["port"].(float64))
@@ -556,7 +480,7 @@ func (client *DiscordClient) readVoiceEndpoint(conn *websocket.Conn) {
 					log.Fatal(err)
 				}
 			case 3:
-				log.Println("OP CODE 3 RECEIVED")
+				//
 			case 4:
 				arr := [32]byte{}
 				for i, v := range m["d"].(map[string]interface{})["secret_key"].([]interface{}) {
@@ -565,9 +489,9 @@ func (client *DiscordClient) readVoiceEndpoint(conn *websocket.Conn) {
 				client.SecretKey = arr
 				log.Println("SECRET KEY:", client.SecretKey)
 			case 5:
-				log.Println("OP CODE 5 RECEIVED")
+				//
 			case 7:
-				log.Println("OP CODE 7 RECEIVED")
+				//
 			case 8:
 				client.VoiceHeartBeatInterval = int(m["d"].(map[string]interface{})["heartbeat_interval"].(float64))
 				go func() {
@@ -583,7 +507,7 @@ func (client *DiscordClient) readVoiceEndpoint(conn *websocket.Conn) {
 					}
 				}()
 			case 9:
-				log.Println("OP CODE 9 RECEIVED")
+				//
 			}
 		}
 	}()
@@ -631,7 +555,7 @@ func (client *DiscordClient) soundEncoder(url string, quit chan bool) chan []byt
 	c := make(chan []byte)
 
 	go func(client *DiscordClient) {
-		pcmbuf := make([]int16, 16384)
+		pcmBuffer := make([]int16, 16384)
 		enc, err := opus.NewEncoder(48000, 2, opus.AppAudio)
 		if err != nil {
 			log.Println("Cannot create opus encoder")
@@ -653,7 +577,7 @@ func (client *DiscordClient) soundEncoder(url string, quit chan bool) chan []byt
 		}(s)
 		defer close(c)
 		for {
-			n, err := s.Read(pcmbuf)
+			n, err := s.Read(pcmBuffer)
 			if err == io.EOF {
 				return
 			} else if err != nil {
@@ -661,7 +585,7 @@ func (client *DiscordClient) soundEncoder(url string, quit chan bool) chan []byt
 				log.Fatal(err)
 			}
 			if n == 960 {
-				pcm := pcmbuf[:n*CHANNELS]
+				pcm := pcmBuffer[:n*CHANNELS]
 				data := make([]byte, 2000)
 				n, err = enc.Encode(pcm, data)
 				if err != nil {
@@ -733,6 +657,8 @@ func (client *DiscordClient) soundSender(audioChan <-chan []byte, quitAudio <-ch
 			}
 			recvAudio = a
 		case <-quitAudio:
+			return
+		case <-quit:
 			return
 		}
 
@@ -811,6 +737,4 @@ func (client *DiscordClient) Close() {
 		}
 	}
 	client.muWrite.Unlock()
-	close(client.musicQueue)
-	close(client.finishedPlaying)
 }
