@@ -1,7 +1,4 @@
-botToken.txt
-clientId.txt
-botToken
-clientId
 music/*
 bot
 *.webm
+config.yaml
