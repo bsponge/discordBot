@@ -25,21 +25,21 @@ import (
 )
 
 const (
-	Dispatch int = iota
-	Heartbeat
-	Identify
-	PresenceUpdate
-	VoiceStateUpdate
-	Resume
-	Reconnect
-	RequestGuildMember
-	InvalidSession
-	Hello
-	HeartbeatACK
+	Dispatch           = 0
+	Heartbeat          = 1
+	Identify           = 2
+	PresenceUpdate     = 3
+	VoiceStateUpdate   = 4
+	Resume             = 6
+	Reconnect          = 7
+	RequestGuildMember = 8
+	InvalidSession     = 9
+	Hello              = 10
+	HeartbeatACK       = 11
 )
 
 const (
-	Permissions = "2080374774"
+	Permissions = "8"
 	ApiURL      = "https://discord.com/api"
 	SampleRate  = 48000
 	Channels    = 2
@@ -464,7 +464,7 @@ func (client *DiscordClient) ConnectToVoiceChannel(channelId string) {
 	var result map[string]interface{}
 	err = json.Unmarshal([]byte(newStr), &result)
 	if err != nil {
-		log.Println("Could not unmarshal response of connect to voice channel request: ", err)
+		log.Println("Could not unmarshal response of voice channel response: ", err)
 		return
 	}
 
@@ -479,8 +479,8 @@ func (client *DiscordClient) ConnectToVoiceChannel(channelId string) {
 	log.Println(string(j))
 
 	client.muWrite.Lock()
+	defer client.muWrite.Unlock()
 	err = client.Conn.WriteJSON(js)
-	client.muWrite.Unlock()
 	if err != nil {
 		log.Println("Could not send voice connection info: ", err)
 		return
@@ -488,27 +488,39 @@ func (client *DiscordClient) ConnectToVoiceChannel(channelId string) {
 }
 
 type voiceConnStruct struct {
-	ServerId  string `json:"server_id"`
-	UserId    string `json:"user_id"`
-	SessionId string `json:"session_id"`
+	ServerID  string `json:"server_id"`
+	UserID    string `json:"user_id"`
+	SessionID string `json:"session_id"`
 	Token     string `json:"token"`
 }
 
 func (client *DiscordClient) ConnectToVoiceEndpoint() {
-	log.Println("Connecting to voice endpoint", client.VoiceEndpoint)
+	connectionURL := fmt.Sprintf("wss://%s?v=4", client.VoiceEndpoint)
 
-	conn, _, err := websocket.DefaultDialer.DialContext(client.ctx, "wss://"+client.VoiceEndpoint+"?v=4", nil)
+	log.Println("Connecting to voice endpoint: ", connectionURL)
+
+	conn, _, err := websocket.DefaultDialer.DialContext(client.ctx, connectionURL, nil)
 	if err != nil {
 		log.Fatal("voice dial:", err)
 	}
 
+	log.Println("Connected to voice endpoint")
+
 	client.VoiceConn = conn
 
-	js := payload{0, voiceConnStruct{client.cfg.ClientID, client.UserId, client.SessionId, client.Token}}
+	js := payload{0, voiceConnStruct{
+		ServerID:  client.cfg.ClientID,
+		UserID:    client.UserId,
+		SessionID: client.SessionId,
+		Token:     client.Token,
+	}}
 
-	err = client.VoiceConn.WriteJSON(js)
+	log.Println("token: ", client.Token)
+
+	err = conn.WriteJSON(js)
 	if err != nil {
-		log.Println(err)
+		log.Println("Could not send voice connection info: ", err)
+		return
 	}
 
 	client.readVoiceEndpoint(client.VoiceConn)
@@ -639,6 +651,8 @@ func (client *DiscordClient) readVoiceEndpoint(conn *websocket.Conn) {
 			case 8:
 				client.VoiceHeartBeatInterval = int(m["d"].(map[string]interface{})["heartbeat_interval"].(float64))
 				go func() {
+					ticker := time.NewTicker(time.Duration(client.VoiceHeartBeatInterval) * time.Millisecond)
+
 					for {
 						js := payload{3, client.s}
 						client.muVoiceWrite.Lock()
@@ -647,7 +661,12 @@ func (client *DiscordClient) readVoiceEndpoint(conn *websocket.Conn) {
 						if err != nil {
 							log.Fatal("voice hb:", err)
 						}
-						time.Sleep(time.Duration(client.VoiceHeartBeatInterval) * time.Millisecond)
+
+						select {
+						case <-client.ctx.Done():
+							return
+						case <-ticker.C:
+						}
 					}
 				}()
 			case 9:
@@ -669,7 +688,7 @@ func getAudioUrl(videoName []string) []byte {
 	cmd := exec.Command("youtube-dl", args...)
 	stdout, err := cmd.Output()
 	if err != nil {
-		log.Fatal("Youtube-dl error")
+		log.Fatal("Youtube-dl error: ", err)
 	}
 	return stdout
 }
