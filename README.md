@@ -6,5 +6,7 @@ youtube-dl required
 
 # Commands  
 play [search query]  
+
 skip
+
 stop
