@@ -68,10 +68,11 @@ type DiscordClient struct {
 
 	SecretKey [32]byte
 
-	GuildId   string
-	SessionId string
-	UserId    string
-	Token     string
+	GuildID        string
+	SessionID      string
+	VoiceSessionID string
+	UserID         string
+	Token          string
 
 	VoiceEndpoint string
 
@@ -297,8 +298,8 @@ func (client *DiscordClient) handleDispatch(m map[string]interface{}) {
 
 	switch t {
 	case "READY":
-		client.UserId = m["d"].(map[string]interface{})["user"].(map[string]interface{})["id"].(string)
-		client.SessionId = m["d"].(map[string]interface{})["session_id"].(string)
+		client.UserID = m["d"].(map[string]interface{})["user"].(map[string]interface{})["id"].(string)
+		client.SessionID = m["d"].(map[string]interface{})["session_id"].(string)
 
 		if m["s"] == nil {
 			client.s = 0
@@ -323,7 +324,7 @@ func (client *DiscordClient) handleDispatch(m map[string]interface{}) {
 		}
 		client.ConnectToVoiceEndpoint()
 	case "VOICE_STATE_UPDATE":
-		client.SessionId = m["d"].(map[string]interface{})["session_id"].(string)
+		client.VoiceSessionID = m["d"].(map[string]interface{})["session_id"].(string)
 		if m["s"] == nil {
 			client.s = 0
 		} else {
@@ -432,7 +433,7 @@ func (client *DiscordClient) GetVoiceRegions() {
 }
 
 type voiceStruct struct {
-	GuildId   string `json:"guild_id"`
+	GuildID   string `json:"guild_id"`
 	ChannelId string `json:"channel_id"`
 	SelfMute  bool   `json:"self_mute"`
 	SelfDeaf  bool   `json:"self_deaf"`
@@ -468,9 +469,9 @@ func (client *DiscordClient) ConnectToVoiceChannel(channelId string) {
 		return
 	}
 
-	client.GuildId = result["id"].(string)
+	client.GuildID = result["id"].(string)
 
-	js := payload{4, voiceStruct{client.GuildId, channelId, false, false}}
+	js := payload{4, voiceStruct{client.GuildID, channelId, false, false}}
 	j, err := json.Marshal(js)
 	if err != nil {
 		log.Println("Could not unmarshal: ", err)
@@ -508,14 +509,20 @@ func (client *DiscordClient) ConnectToVoiceEndpoint() {
 
 	client.VoiceConn = conn
 
+	for {
+		if client.VoiceSessionID != "" {
+			break
+		}
+	}
+
 	js := payload{0, voiceConnStruct{
-		ServerID:  client.cfg.ClientID,
-		UserID:    client.UserId,
-		SessionID: client.SessionId,
+		ServerID:  client.cfg.ServerID,
+		UserID:    client.UserID,
+		SessionID: client.VoiceSessionID,
 		Token:     client.Token,
 	}}
 
-	log.Println("token: ", client.Token)
+	log.Println("sending voice json payload : ", fmt.Sprintf("%v", js))
 
 	err = conn.WriteJSON(js)
 	if err != nil {
@@ -688,7 +695,7 @@ func getAudioUrl(videoName []string) []byte {
 	cmd := exec.Command("youtube-dl", args...)
 	stdout, err := cmd.Output()
 	if err != nil {
-		log.Fatal("Youtube-dl error: ", err)
+		log.Fatalf("Youtube-dl (cmd: %s) error: %s", cmd.String(), err)
 	}
 	return stdout
 }
@@ -876,8 +883,6 @@ func (client *DiscordClient) sendHeartBeatEvery(milis int) {
 	ticker := time.NewTicker(time.Duration(milis) * time.Millisecond)
 
 	for {
-		log.Println("Will send heartbeat")
-
 		var js heartbeat
 		client.muS.Lock()
 		js = heartbeat{1, client.s}
