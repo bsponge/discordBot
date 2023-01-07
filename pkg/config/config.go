@@ -10,8 +10,9 @@ import (
 const configFileName = "config.yaml"
 
 type Config struct {
+	ServerID string `yaml:"server-id"`
 	Token    string `yaml:"token"`
-	ClientID string `yaml:"clientID"`
+	ClientID string `yaml:"client-id"`
 }
 
 func NewConfig() (*Config, error) {
