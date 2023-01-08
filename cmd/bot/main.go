@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -49,12 +48,5 @@ func main() {
 	select {
 	case <-wait:
 	case <-ctx.Done():
-	}
-}
-
-func printMenu() {
-	list := []string{"1.INIT", "2.QUIT"}
-	for _, v := range list {
-		fmt.Println(v)
 	}
 }
