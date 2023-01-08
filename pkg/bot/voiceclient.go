@@ -198,16 +198,19 @@ func (c *DiscordVoiceClient) connectToVoiceEndpoint() error {
 		}
 	}
 
-	msg := payload{0, voiceConnStruct{
-		ServerID:  c.cfg.ServerID,
-		UserID:    c.UserID,
-		SessionID: c.voiceSessionID,
-		Token:     c.voiceToken,
-	}}
+	msg := payload{
+		0,
+		voiceConnStruct{
+			ServerID:  c.cfg.ServerID,
+			UserID:    c.UserID,
+			SessionID: c.voiceSessionID,
+			Token:     c.voiceToken,
+		},
+	}
 
 	log.Println("sending voice json payload : ", fmt.Sprintf("%v", msg))
 
-	err = c.client.SendMessage(msg)
+	err = c.voiceConn.WriteJSON(msg)
 	if err != nil {
 		return err
 	}
